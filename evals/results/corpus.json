@@ -1,0 +1,142 @@
+{
+  "toolcalls": {
+    "tiers": {
+      "plain": {
+        "n": 95,
+        "exact_match": 95,
+        "exact_rate": 1.0,
+        "missed_violation_rate": 0.0,
+        "false_block_rate": 0.0,
+        "path_recall": 1.0,
+        "debatable": 0,
+        "opaque_ask": 2
+      },
+      "adversarial": {
+        "n": 107,
+        "exact_match": 107,
+        "exact_rate": 1.0,
+        "missed_violation_rate": 0.0,
+        "false_block_rate": 0.0,
+        "path_recall": 0.976,
+        "debatable": 0,
+        "opaque_ask": 7
+      },
+      "benign": {
+        "n": 63,
+        "exact_match": 63,
+        "exact_rate": 1.0,
+        "missed_violation_rate": 0.0,
+        "false_block_rate": 0.0,
+        "path_recall": 1.0,
+        "debatable": 0,
+        "opaque_ask": 0
+      }
+    },
+    "categories": {
+      "delete": {
+        "tp": 96,
+        "fn": 0,
+        "fp": 0,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "edit_path": {
+        "tp": 49,
+        "fn": 0,
+        "fp": 0,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "push": {
+        "tp": 17,
+        "fn": 0,
+        "fp": 0,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "force_push": {
+        "tp": 10,
+        "fn": 0,
+        "fp": 0,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "commit": {
+        "tp": 5,
+        "fn": 0,
+        "fp": 0,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "touch_prod": {
+        "tp": 16,
+        "fn": 0,
+        "fp": 0,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "run_cmd": {
+        "tp": 18,
+        "fn": 0,
+        "fp": 0,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "network": {
+        "tp": 26,
+        "fn": 0,
+        "fp": 0,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "install": {
+        "tp": 16,
+        "fn": 0,
+        "fp": 0,
+        "recall": 1.0,
+        "precision": 1.0
+      }
+    },
+    "misses": [],
+    "false_blocks": [],
+    "latency_ms": {
+      "median": 0.03176400014126557,
+      "p95": 0.059703000260924455
+    }
+  },
+  "constraints": {
+    "tiers": {
+      "plain": {
+        "n": 32,
+        "exact_rate": 1.0,
+        "rule_recall": 1.0,
+        "spurious_rules": 0
+      },
+      "paraphrase": {
+        "n": 42,
+        "exact_rate": 1.0,
+        "rule_recall": 1.0,
+        "spurious_rules": 0
+      },
+      "negative": {
+        "n": 28,
+        "exact_rate": 1.0,
+        "rule_recall": null,
+        "spurious_rules": 0
+      }
+    },
+    "mismatches": []
+  },
+  "confirmations": {
+    "n": 40,
+    "accuracy": 0.975,
+    "wrong": [
+      [
+        "cf-022",
+        "yes to the push, no to the force push",
+        true,
+        false
+      ]
+    ]
+  }
+}
