@@ -79,7 +79,7 @@ class Simple:
     def writes(self) -> list[str]:
         """Files this command writes through redirects, ``tee`` or ``dd of=``."""
         out = [r.target for r in self.redirects if r.op in (">", ">>") and r.target not in DEVNULL]
-        if self.cmd == "tee":
+        if self.cmd in ("tee", "sponge"):
             out += [resolve_path(a, self.cwd, None) for a in self.argv[1:]
                     if not a.startswith("-") and a not in DEVNULL]
         elif self.cmd == "dd":
@@ -630,6 +630,12 @@ def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
                 out.append(Simple(argv=sub, raw=seg.raw, cwd=cwd, env=env, sep=seg.sep, prev=prev,
                                   via=via + ["find -exec"]))
             return out
+
+    if cmd == "git" and any(t.dyn or t.substs for t in word_toks[dropped + 1:]):
+        s.opaque, s.guess = True, ["push", "force_push", "commit", "delete", "network"]
+        s.evidence = "git subcommand or arguments are dynamic"
+        out.append(s)
+        return out
 
     if cmd in INTERPRETERS or any(cmd.startswith(p) for p in ("python",)):
         code = _interpreter_code(words, seg.heredoc)

@@ -240,6 +240,18 @@ def _classify_simple(s: Simple, home: str | None) -> list[Action]:
                         out.append(Action("edit_path", _resolve(srcs, s, home), 0.7, False, f"{ev} moves away source"))
     elif cmd == "touch":
         out.append(Action("edit_path", _resolve(_args(s.argv, {"-d", "-t", "-r"}), s, home), 0.9, False, ev))
+    elif cmd == "perl" and any(re.match(r"^-[pnlaw0-9]*i", a) for a in s.argv[1:]):
+        files = _args(s.argv, {"-e", "-E", "-M", "-m", "-I"})
+        out.append(Action("edit_path", _resolve(files, s, home), 0.9, False, f"{ev} (perl in-place edit)"))
+    elif cmd == "tar" and s.argv[1:2] and ("x" in s.argv[1].lstrip("-") or "--extract" in s.argv or "-x" in s.argv):
+        dest = [s.argv[i + 1] for i, a in enumerate(s.argv) if a in ("-C", "--directory") and i + 1 < len(s.argv)]
+        dest += [a.split("=", 1)[1] for a in s.argv if a.startswith("--directory=")]
+        out.append(Action("edit_path", _resolve(dest or ["."], s, home), 0.8, False, f"{ev} (extracts files)"))
+    elif cmd == "unzip":
+        dest = [s.argv[i + 1] for i, a in enumerate(s.argv) if a == "-d" and i + 1 < len(s.argv)]
+        out.append(Action("edit_path", _resolve(dest or ["."], s, home), 0.8, False, f"{ev} (extracts files)"))
+    elif cmd == "gio" and args[:1] == ["trash"]:
+        out.append(Action("delete", _resolve(args[1:], s, home), 0.9, False, ev))
     elif cmd == "patch":
         files = _args(s.argv, {"-p", "-d", "-i", "-o", "-r", "-D", "-F", "-z", "-B", "-Y"})
         inputs = [s.argv[i + 1] for i, a in enumerate(s.argv) if a in ("-i", "--input") and i + 1 < len(s.argv)]

@@ -267,3 +267,29 @@ def test_unknown_tool_and_missing_fields():
 def test_action_is_dataclass_with_fields():
     a = Action("delete", ["/x"], 0.9, False, "rm")
     assert a.category == "delete" and a.paths == ["/x"] and a.evidence == "rm"
+
+
+# --- adversarial extras found by probing --------------------------------------------------------
+
+def test_dynamic_git_subcommand_is_opaque(proj):
+    for cmd in ["git $(echo push)", "git ${X:-push}", "g=git; $g push"]:
+        acts = bash(cmd, proj)
+        assert any(a.opaque and a.category == "push" for a in acts), cmd
+
+
+@pytest.mark.parametrize("cmd,rel", [
+    ("perl -pi -e 's/a/b/' tests/test_a.py", "tests/test_a.py"),
+    ("perl -i.bak -pe 's/a/b/' tests/test_a.py", "tests/test_a.py"),
+    ("echo x | sponge tests/test_a.py", "tests/test_a.py"),
+    ("tar xf a.tar -C tests", "tests"),
+    ("tar -xzf a.tgz --directory=tests", "tests"),
+    ("unzip a.zip -d tests", "tests"),
+])
+def test_more_edit_paths(cmd, rel, proj):
+    acts = by(bash(cmd, proj), "edit_path")
+    assert os.path.join(proj, rel) in [p for a in acts for p in a.paths], cmd
+
+
+def test_gio_trash_is_delete(proj):
+    assert "delete" in cats(bash("gio trash tests", proj))
+    assert "delete" not in cats(bash("gio info tests", proj))
