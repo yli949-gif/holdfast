@@ -107,7 +107,7 @@ class Rule:
             body = f"order: {phrase} only after {self.requires}"
         else:  # scope
             body = f"scope: only edit files under {self.target!r}"
-        return f"{self.id}: {body}"
+        return f"{self.id} [{self.kind} {self.action}]: {body}"
 
     def source_note(self) -> str:
         """``from your message at turn 3`` or ``added manually`` for reasons."""
