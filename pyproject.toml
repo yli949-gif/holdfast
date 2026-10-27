@@ -1,0 +1,20 @@
+[project]
+name = "holdfast"
+version = "0.1.0"
+description = "Stateful constraint guard for coding agents (Claude Code hooks). Constraints that survive compaction."
+requires-python = ">=3.10"
+dependencies = []
+license = {text = "MIT"}
+
+[project.scripts]
+holdfast = "holdfast.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
