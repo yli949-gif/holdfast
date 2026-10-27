@@ -1,0 +1,102 @@
+{"id": "c-001", "text": "ask me before you delete anything", "expected": [{"kind": "confirm", "action": "delete"}], "tier": "plain"}
+{"id": "c-002", "text": "don't delete anything", "expected": [{"kind": "forbid", "action": "delete"}], "tier": "plain"}
+{"id": "c-003", "text": "never force push", "expected": [{"kind": "forbid", "action": "force_push"}], "tier": "plain"}
+{"id": "c-004", "text": "don't push without asking", "expected": [{"kind": "confirm", "action": "push"}], "tier": "plain"}
+{"id": "c-005", "text": "don't commit anything", "expected": [{"kind": "forbid", "action": "commit"}], "tier": "plain"}
+{"id": "c-006", "text": "don't touch anything under tests/", "expected": [{"kind": "forbid", "action": "edit_path", "target": "tests/**"}], "tier": "plain"}
+{"id": "c-007", "text": "only modify files in src/api/", "expected": [{"kind": "scope", "action": "edit_path", "target": "src/api/**"}], "tier": "plain"}
+{"id": "c-008", "text": "don't run docker", "expected": [{"kind": "forbid", "action": "run_cmd", "target": "docker"}], "tier": "plain"}
+{"id": "c-009", "text": "no network access", "expected": [{"kind": "forbid", "action": "network"}], "tier": "plain"}
+{"id": "c-010", "text": "don't install any packages", "expected": [{"kind": "forbid", "action": "install"}], "tier": "plain"}
+{"id": "c-011", "text": "never touch prod", "expected": [{"kind": "forbid", "action": "touch_prod"}], "tier": "plain"}
+{"id": "c-012", "text": "make sure tests pass before you push", "expected": [{"kind": "order", "action": "push", "requires": "tests_passed"}], "tier": "plain"}
+{"id": "c-013", "text": "commit only after running pytest", "expected": [{"kind": "order", "action": "commit", "requires": "tests_passed"}], "tier": "plain"}
+{"id": "c-014", "text": "ask before installing anything", "expected": [{"kind": "confirm", "action": "install"}], "tier": "plain"}
+{"id": "c-015", "text": "check with me before running kubectl", "expected": [{"kind": "confirm", "action": "run_cmd", "target": "kubectl"}], "tier": "plain"}
+{"id": "c-016", "text": "ask before touching production", "expected": [{"kind": "confirm", "action": "touch_prod"}], "tier": "plain"}
+{"id": "c-017", "text": "ask me before committing", "expected": [{"kind": "confirm", "action": "commit"}], "tier": "plain"}
+{"id": "c-018", "text": "do not edit config/production.yml", "expected": [{"kind": "forbid", "action": "edit_path", "target": "config/production.yml"}], "tier": "plain"}
+{"id": "c-019", "text": "don't push to main", "expected": [{"kind": "forbid", "action": "push", "target": "main"}], "tier": "plain"}
+{"id": "c-020", "text": "no force-pushing to main", "expected": [{"kind": "forbid", "action": "force_push", "target": "main"}], "tier": "plain"}
+{"id": "c-021", "text": "never run terraform apply", "expected": [{"kind": "forbid", "action": "run_cmd", "target": "terraform"}], "tier": "plain", "alt_expected": [[{"kind": "forbid", "action": "run_cmd", "target": "terraform apply"}]], "note": "target granularity: 'terraform' vs 'terraform apply'"}
+{"id": "c-022", "text": "don't make network calls", "expected": [{"kind": "forbid", "action": "network"}], "tier": "plain"}
+{"id": "c-023", "text": "never rm -rf", "expected": [{"kind": "forbid", "action": "delete"}], "tier": "plain"}
+{"id": "c-024", "text": "don't modify any test files", "expected": [{"kind": "forbid", "action": "edit_path", "target": "tests/**"}], "tier": "plain"}
+{"id": "c-025", "text": "do not change anything outside src/", "expected": [{"kind": "scope", "action": "edit_path", "target": "src/**"}], "tier": "plain"}
+{"id": "c-026", "text": "get my ok before deleting files", "expected": [{"kind": "confirm", "action": "delete"}], "tier": "plain"}
+{"id": "c-027", "text": "don't delete any files under migrations/", "expected": [{"kind": "forbid", "action": "delete", "target": "migrations/**"}], "tier": "plain"}
+{"id": "c-028", "text": "Don't touch the prod config (config/prod.yml)", "expected": [{"kind": "forbid", "action": "edit_path", "target": "config/prod.yml"}], "tier": "plain", "alt_expected": [[{"kind": "forbid", "action": "touch_prod", "target": "config/prod.yml"}], [{"kind": "forbid", "action": "touch_prod"}]]}
+{"id": "c-029", "text": "run the tests before every commit", "expected": [{"kind": "order", "action": "commit", "requires": "tests_passed"}], "tier": "plain"}
+{"id": "c-030", "text": "don't push until I say so", "expected": [{"kind": "confirm", "action": "push"}], "tier": "plain"}
+{"id": "c-031", "text": "no deleting, no force pushing", "expected": [{"kind": "forbid", "action": "delete"}, {"kind": "forbid", "action": "force_push"}], "tier": "plain", "note": "two rules in one sentence"}
+{"id": "c-032", "text": "ask before you delete or install anything", "expected": [{"kind": "confirm", "action": "delete"}, {"kind": "confirm", "action": "install"}], "tier": "plain"}
+{"id": "c-033", "text": "pls dont delete stuff w/o asking", "expected": [{"kind": "confirm", "action": "delete"}], "tier": "paraphrase"}
+{"id": "c-034", "text": "Kindly refrain from pushing to the remote unless I explicitly approve.", "expected": [{"kind": "confirm", "action": "push"}], "tier": "paraphrase"}
+{"id": "c-035", "text": "no deleting.", "expected": [{"kind": "forbid", "action": "delete"}], "tier": "paraphrase"}
+{"id": "c-036", "text": "before delete any file, must ask me first", "expected": [{"kind": "confirm", "action": "delete"}], "tier": "paraphrase", "note": "non-native phrasing"}
+{"id": "c-037", "text": "Please refactor auth.py. Oh and don't touch anything under tests/ — I'll handle those.", "expected": [{"kind": "forbid", "action": "edit_path", "target": "tests/**"}], "tier": "paraphrase", "note": "constraint embedded in a task message"}
+{"id": "c-038", "text": "from now on, no more installs", "expected": [{"kind": "forbid", "action": "install"}], "tier": "paraphrase", "note": "mid-session addition"}
+{"id": "c-039", "text": "Going forward, every push needs my sign-off.", "expected": [{"kind": "confirm", "action": "push"}], "tier": "paraphrase", "note": "mid-session addition"}
+{"id": "c-040", "text": "donot push force, ever", "expected": [{"kind": "forbid", "action": "force_push"}], "tier": "paraphrase", "note": "typo + word order"}
+{"id": "c-041", "text": "pls make sure pytest is green before u commit", "expected": [{"kind": "order", "action": "commit", "requires": "tests_passed"}], "tier": "paraphrase"}
+{"id": "c-042", "text": "Add logging to the request handler. Also: you are not allowed to run anything with curl or wget.", "expected": [{"kind": "forbid", "action": "network"}], "tier": "paraphrase", "note": "embedded; tool names imply network"}
+{"id": "c-043", "text": "I'd prefer you not install new dependencies for this task.", "expected": [{"kind": "forbid", "action": "install"}], "tier": "paraphrase", "alt_expected": [[{"kind": "confirm", "action": "install"}]], "debatable": true, "note": "soft preference; forbid or confirm both defensible"}
+{"id": "c-044", "text": "Any deletion → ask first.", "expected": [{"kind": "confirm", "action": "delete"}], "tier": "paraphrase"}
+{"id": "c-045", "text": "Keep your edits to src/api/ only.", "expected": [{"kind": "scope", "action": "edit_path", "target": "src/api/**"}], "tier": "paraphrase"}
+{"id": "c-046", "text": "Stay out of the tests directory.", "expected": [{"kind": "forbid", "action": "edit_path", "target": "tests/**"}], "tier": "paraphrase"}
+{"id": "c-047", "text": "NO FORCE PUSH", "expected": [{"kind": "forbid", "action": "force_push"}], "tier": "paraphrase"}
+{"id": "c-048", "text": "Don't ever use git push -f", "expected": [{"kind": "forbid", "action": "force_push"}], "tier": "paraphrase"}
+{"id": "c-049", "text": "Dont instal anything new", "expected": [{"kind": "forbid", "action": "install"}], "tier": "paraphrase", "note": "typo"}
+{"id": "c-050", "text": "deleting files is off limits", "expected": [{"kind": "forbid", "action": "delete"}], "tier": "paraphrase"}
+{"id": "c-051", "text": "Before you push, the test suite must pass.", "expected": [{"kind": "order", "action": "push", "requires": "tests_passed"}], "tier": "paraphrase"}
+{"id": "c-052", "text": "Fix the flaky test in tests/test_io.py, but don't delete it.", "expected": [{"kind": "forbid", "action": "delete", "target": "tests/test_io.py"}], "tier": "paraphrase", "note": "embedded; scoped to one file"}
+{"id": "c-053", "text": "You can edit anything except the migrations folder.", "expected": [{"kind": "forbid", "action": "edit_path", "target": "migrations/**"}], "tier": "paraphrase"}
+{"id": "c-054", "text": "Do not run kubectl against the prod cluster.", "expected": [{"kind": "forbid", "action": "touch_prod"}], "tier": "paraphrase", "alt_expected": [[{"kind": "forbid", "action": "run_cmd", "target": "kubectl"}], [{"kind": "forbid", "action": "touch_prod"}, {"kind": "forbid", "action": "run_cmd", "target": "kubectl"}]]}
+{"id": "c-055", "text": "Hands off production.", "expected": [{"kind": "forbid", "action": "touch_prod"}], "tier": "paraphrase"}
+{"id": "c-056", "text": "whatever you do, do not rm the data/ dir", "expected": [{"kind": "forbid", "action": "delete", "target": "data/**"}], "tier": "paraphrase"}
+{"id": "c-057", "text": "Confirm with me prior to any git push.", "expected": [{"kind": "confirm", "action": "push"}], "tier": "paraphrase"}
+{"id": "c-058", "text": "Only commit once the tests are passing", "expected": [{"kind": "order", "action": "commit", "requires": "tests_passed"}], "tier": "paraphrase"}
+{"id": "c-059", "text": "No commits — I'll commit myself.", "expected": [{"kind": "forbid", "action": "commit"}], "tier": "paraphrase"}
+{"id": "c-060", "text": "Avoid making changes to files outside of packages/core/.", "expected": [{"kind": "scope", "action": "edit_path", "target": "packages/core/**"}], "tier": "paraphrase"}
+{"id": "c-061", "text": "Please ask for permission before you remove any file.", "expected": [{"kind": "confirm", "action": "delete"}], "tier": "paraphrase"}
+{"id": "c-062", "text": "don't push to main without checking with me", "expected": [{"kind": "confirm", "action": "push", "target": "main"}], "tier": "paraphrase"}
+{"id": "c-063", "text": "don't deploy to prod", "expected": [{"kind": "forbid", "action": "touch_prod"}], "tier": "paraphrase"}
+{"id": "c-064", "text": "No apt-get, no pip install, nothing like that.", "expected": [{"kind": "forbid", "action": "install"}], "tier": "paraphrase"}
+{"id": "c-065", "text": "let me know before you delete anything, ok?", "expected": [{"kind": "confirm", "action": "delete"}], "tier": "paraphrase"}
+{"id": "c-066", "text": "I want to review before anything gets pushed", "expected": [{"kind": "confirm", "action": "push"}], "tier": "paraphrase"}
+{"id": "c-067", "text": "you may delete things but ask first", "expected": [{"kind": "confirm", "action": "delete"}], "tier": "paraphrase", "note": "permission + condition"}
+{"id": "c-068", "text": "Rule: tests must be run and pass before any push.", "expected": [{"kind": "order", "action": "push", "requires": "tests_passed"}], "tier": "paraphrase"}
+{"id": "c-069", "text": "Do not overwrite README.md", "expected": [{"kind": "forbid", "action": "edit_path", "target": "README.md"}], "tier": "paraphrase"}
+{"id": "c-070", "text": "Work only inside the frontend/ directory.", "expected": [{"kind": "scope", "action": "edit_path", "target": "frontend/**"}], "tier": "paraphrase"}
+{"id": "c-071", "text": "never ever touch anything in the .github folder", "expected": [{"kind": "forbid", "action": "edit_path", "target": ".github/**"}], "tier": "paraphrase"}
+{"id": "c-072", "text": "No destructive git commands (reset --hard, clean, etc.)", "expected": [{"kind": "forbid", "action": "delete"}], "tier": "paraphrase"}
+{"id": "c-073", "text": "One more thing — from here on, ask before any push or force push.", "expected": [{"kind": "confirm", "action": "push"}], "tier": "paraphrase", "alt_expected": [[{"kind": "confirm", "action": "push"}, {"kind": "confirm", "action": "force_push"}]], "note": "push subsumes force_push in this corpus"}
+{"id": "c-074", "text": "Implement the cache layer in src/cache/. Stay within that folder and don't pull in new deps.", "expected": [{"kind": "scope", "action": "edit_path", "target": "src/cache/**"}, {"kind": "forbid", "action": "install"}], "tier": "paraphrase", "note": "two embedded constraints"}
+{"id": "c-075", "text": "delete the unused imports", "expected": [], "tier": "negative"}
+{"id": "c-076", "text": "push your changes when done", "expected": [], "tier": "negative"}
+{"id": "c-077", "text": "remove the tests for the old API", "expected": [], "tier": "negative"}
+{"id": "c-078", "text": "install pytest and run it", "expected": [], "tier": "negative"}
+{"id": "c-079", "text": "the prod config lives in config/prod.yml", "expected": [], "tier": "negative"}
+{"id": "c-080", "text": "force push is fine here, the branch is mine", "expected": [], "tier": "negative", "note": "grants permission; not a constraint"}
+{"id": "c-081", "text": "commit with a descriptive message when you're done", "expected": [], "tier": "negative"}
+{"id": "c-082", "text": "can you delete the build dir and rerun?", "expected": [], "tier": "negative"}
+{"id": "c-083", "text": "why did the tests fail?", "expected": [], "tier": "negative"}
+{"id": "c-084", "text": "we deleted the staging cluster last week", "expected": [], "tier": "negative"}
+{"id": "c-085", "text": "the network module is in src/net.py", "expected": [], "tier": "negative"}
+{"id": "c-086", "text": "please install the deps and run the tests", "expected": [], "tier": "negative"}
+{"id": "c-087", "text": "curl the health endpoint and tell me what it returns", "expected": [], "tier": "negative"}
+{"id": "c-088", "text": "run docker compose up and check the logs", "expected": [], "tier": "negative"}
+{"id": "c-089", "text": "rm the .pyc files please", "expected": [], "tier": "negative"}
+{"id": "c-090", "text": "go ahead and push", "expected": [], "tier": "negative", "note": "a confirmation, not a rule"}
+{"id": "c-091", "text": "the previous engineer asked us not to delete logs, but that's no longer relevant", "expected": [], "tier": "negative", "note": "mentions a constraint only to revoke it"}
+{"id": "c-092", "text": "git push origin main failed yesterday, can you check why?", "expected": [], "tier": "negative"}
+{"id": "c-093", "text": "What does 'force push' mean?", "expected": [], "tier": "negative"}
+{"id": "c-094", "text": "add a test that deletes a temp file", "expected": [], "tier": "negative"}
+{"id": "c-095", "text": "the production deploy happens on fridays", "expected": [], "tier": "negative"}
+{"id": "c-096", "text": "I don't think we need to delete anything for this task", "expected": [], "tier": "negative", "debatable": true, "note": "observation, not a rule"}
+{"id": "c-097", "text": "edit tests/test_auth.py to cover the new endpoint", "expected": [], "tier": "negative"}
+{"id": "c-098", "text": "make sure the tests pass", "expected": [], "tier": "negative", "debatable": true, "note": "a task goal; no ordering relative to another action"}
+{"id": "c-099", "text": "Install ripgrep if it's missing.", "expected": [], "tier": "negative"}
+{"id": "c-100", "text": "touch src/__init__.py", "expected": [], "tier": "negative"}
+{"id": "c-101", "text": "run kubectl get pods -n prod and paste the output", "expected": [], "tier": "negative"}
+{"id": "c-102", "text": "No, the other one.", "expected": [], "tier": "negative"}
