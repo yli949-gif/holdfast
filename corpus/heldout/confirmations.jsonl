@@ -1,0 +1,39 @@
+{"id": "cf-001", "text": "yep go for it", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}}
+{"id": "cf-002", "text": "ok do it", "pending_action": "push", "expected": {"is_confirmation": true, "action": "push"}}
+{"id": "cf-003", "text": "approved", "pending_action": "push", "expected": {"is_confirmation": true, "action": "push"}}
+{"id": "cf-004", "text": "fine, delete them", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}}
+{"id": "cf-005", "text": "yes please push", "pending_action": "push", "expected": {"is_confirmation": true, "action": "push"}}
+{"id": "cf-006", "text": "I confirm", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}}
+{"id": "cf-007", "text": "confirmed ✅", "pending_action": "install", "expected": {"is_confirmation": true, "action": "install"}}
+{"id": "cf-008", "text": "yes install it", "pending_action": "install", "expected": {"is_confirmation": true, "action": "install"}}
+{"id": "cf-009", "text": "ya go ahead delete the cache, thx", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}}
+{"id": "cf-010", "text": "Yes.", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}}
+{"id": "cf-011", "text": "好的，删吧 (ok, delete it)", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}}
+{"id": "cf-012", "text": "yes to prod", "pending_action": "touch_prod", "expected": {"is_confirmation": true, "action": "touch_prod"}}
+{"id": "cf-013", "text": "do it, I'm watching", "pending_action": "run_cmd", "expected": {"is_confirmation": true, "action": "run_cmd"}}
+{"id": "cf-014", "text": "yes, use sudo", "pending_action": "install", "expected": {"is_confirmation": true, "action": "install"}}
+{"id": "cf-015", "text": "go ahead with the commit, hold the push", "pending_action": "commit", "expected": {"is_confirmation": true, "action": "commit"}}
+{"id": "cf-016", "text": "go ahead with the commit, hold the push", "pending_action": "push", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-017", "text": "yes push it, but no force", "pending_action": "push", "expected": {"is_confirmation": true, "action": "push"}}
+{"id": "cf-018", "text": "yes push it, but no force", "pending_action": "force_push", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-019", "text": "👍", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}, "debatable": true}
+{"id": "cf-020", "text": "y", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}, "debatable": true}
+{"id": "cf-021", "text": "ok", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}, "debatable": true}
+{"id": "cf-022", "text": "lgtm, ship it", "pending_action": "push", "expected": {"is_confirmation": true, "action": "push"}, "debatable": true}
+{"id": "cf-023", "text": "sounds good", "pending_action": "push", "expected": {"is_confirmation": true, "action": "push"}, "debatable": true}
+{"id": "cf-024", "text": "ok but only the pyc files", "pending_action": "delete", "expected": {"is_confirmation": true, "action": "delete"}, "debatable": true}
+{"id": "cf-025", "text": "yes that's the bug", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-026", "text": "sure, what do you need?", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-027", "text": "ok wait", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-028", "text": "yes — but not the migrations", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}, "debatable": true}
+{"id": "cf-029", "text": "no way", "pending_action": "push", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-030", "text": "hmm let me think", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-031", "text": "I deleted it already, move on", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-032", "text": "yes?", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}, "debatable": true}
+{"id": "cf-033", "text": "can you explain why you need to delete it first?", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-034", "text": "absolutely not", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-035", "text": "done, pushed it myself", "pending_action": "push", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-036", "text": "not yet", "pending_action": "delete", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-037", "text": "yes the build is green now", "pending_action": "push", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-038", "text": "ok, so what's the plan?", "pending_action": "push", "expected": {"is_confirmation": false, "action": null}}
+{"id": "cf-039", "text": "yes if the tests pass", "pending_action": "push", "expected": {"is_confirmation": false, "action": null}, "debatable": true}
