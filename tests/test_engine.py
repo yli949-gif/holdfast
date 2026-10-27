@@ -65,6 +65,20 @@ def test_forbid_with_target_only_matches_inside():
     assert evaluate([R(kind="forbid", action="delete", target="tests/**")], st(), [delete(".")], CWD).decision == "deny"
 
 
+def test_edit_path_rules_cover_deletes_on_matching_paths():
+    rules = [R(kind="forbid", action="edit_path", target="tests/**")]
+    assert evaluate(rules, st(), [delete("tests/test_a.py")], CWD).decision == "deny"
+    assert evaluate(rules, st(), [delete("src/a.py")], CWD).decision == "allow"
+    # but an untargeted edit_path rule does not swallow every delete
+    assert evaluate([R(kind="forbid", action="edit_path")], st(), [delete("x")], CWD).decision == "allow"
+
+
+def test_scope_covers_deletes_outside_target():
+    rules = [R(kind="scope", action="edit_path", target="src/**")]
+    assert evaluate(rules, st(), [delete("tests/a.py")], CWD).decision == "deny"
+    assert evaluate(rules, st(), [delete("src/a.py")], CWD).decision == "allow"
+
+
 def test_forbid_any():
     assert evaluate([R(kind="forbid", action="any")], st(), [Action("push", [], 1.0)], CWD).decision == "deny"
 

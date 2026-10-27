@@ -108,9 +108,11 @@ def rule_applies(rule: Rule, action: Action, cwd: str) -> bool:
     """Does ``rule`` govern ``action``?  (scope rules are handled separately.)"""
     if not rule.active or rule.kind == "scope":
         return False
-    if rule.action != "any" and rule.action != action.category:
-        return False
     cat = action.category
+    if rule.action != "any" and rule.action != cat:
+        # a targeted edit_path rule also covers deleting those files
+        if not (rule.action == "edit_path" and cat == "delete" and rule.target):
+            return False
     if rule.target:
         if cat in PATH_CATEGORIES:
             return _paths_match(rule.target, action.paths, cwd)
@@ -226,7 +228,7 @@ def evaluate(rules: Iterable[Rule], state: Any, actions: Iterable[Action], cwd: 
     for action in actions:
         for rule in rules:
             if rule.kind == "scope":
-                if action.category == "edit_path" and not action.opaque and \
+                if action.category in ("edit_path", "delete") and not action.opaque and \
                         not (action.paths and all(glob_match(rule.target, p, cwd) for p in action.paths)):
                     consider(Decision("deny", _deny_reason(rule, action, cwd), rule.id, action))
                 continue
