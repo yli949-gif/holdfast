@@ -21,8 +21,11 @@ from holdfast.extract import extract, extract_confirmations  # noqa: E402
 CWD = "/proj"
 
 
+CORPUS_DIR = ROOT / "corpus"
+
+
 def load(name):
-    return [json.loads(l) for l in (ROOT / "corpus" / name).read_text().splitlines() if l.strip()]
+    return [json.loads(l) for l in (CORPUS_DIR / name).read_text().splitlines() if l.strip()]
 
 
 def score_toolcalls(verbose):
@@ -148,8 +151,12 @@ def score_confirmations(verbose):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--verbose", action="store_true")
-    ap.add_argument("--out", default=str(ROOT / "evals/results/corpus.json"))
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--corpus", default="corpus", help="corpus or corpus/heldout")
     a = ap.parse_args()
+    global CORPUS_DIR
+    CORPUS_DIR = ROOT / a.corpus
+    a.out = a.out or str(ROOT / "evals/results" / (a.corpus.replace("/", "_") + ".json"))
     res = {"toolcalls": score_toolcalls(a.verbose), "constraints": score_constraints(a.verbose),
            "confirmations": score_confirmations(a.verbose)}
     pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)
