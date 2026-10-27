@@ -1,0 +1,1 @@
+{"rules": [{"kind": "order", "action": "push", "target": null, "requires": "tests_passed", "source": {"turn": null, "text": "run the test suite before every push", "via": "llm"}}], "latency_s": 7.34}

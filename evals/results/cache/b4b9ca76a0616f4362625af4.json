@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "delete", "target": "tests/**", "requires": null, "source": {"turn": null, "text": "Please no delete the tests folder, very important", "via": "llm"}}], "latency_s": 4.85}

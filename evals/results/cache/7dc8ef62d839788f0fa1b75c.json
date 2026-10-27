@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "edit_path", "target": "tests/fixtures/**", "requires": null, "source": {"turn": null, "text": "please dont remove the fixtures under tests/fixtures", "via": "llm"}}], "latency_s": 5.31}

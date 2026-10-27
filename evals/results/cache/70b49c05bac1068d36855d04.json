@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "run_cmd", "target": "rm", "requires": null, "source": {"turn": null, "text": "rm is banned", "via": "llm"}}], "latency_s": 6.6}

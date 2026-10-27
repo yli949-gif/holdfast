@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "push", "target": null, "requires": "user_confirmed", "source": {"turn": null, "text": "pushing requires my sign-off", "via": "llm"}}], "latency_s": 6.82}

@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "push", "target": "main", "requires": null, "source": {"turn": null, "text": "pushing to main is off limits", "via": "llm"}}], "latency_s": 4.8}

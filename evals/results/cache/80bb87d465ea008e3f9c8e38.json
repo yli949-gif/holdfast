@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "delete", "target": null, "requires": "user_confirmed", "source": {"turn": null, "text": "\u5fc5\u987b\u5148\u95ee\u6211\u518d\u5220\u9664 (ask me first before deleting)", "via": "llm"}}], "latency_s": 6.38}

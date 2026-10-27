@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "run_cmd", "target": "docker", "requires": "user_confirmed", "source": {"turn": null, "text": "no docker commands without checking with me", "via": "llm"}}], "latency_s": 6.22}

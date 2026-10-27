@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "delete", "target": null, "requires": null, "source": {"turn": null, "text": "NEVER DELETE ANYTHING", "via": "llm"}}], "latency_s": 7.05}

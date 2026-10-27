@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "commit", "target": null, "requires": "user_confirmed", "source": {"turn": null, "text": "Please confirm with me prior to any commit", "via": "llm"}}], "latency_s": 6.68}

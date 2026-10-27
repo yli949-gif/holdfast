@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "push", "target": null, "requires": null, "source": {"turn": null, "text": "Do NOT push. I repeat, do not push.", "via": "llm"}}], "latency_s": 7.05}

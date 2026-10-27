@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "run_cmd", "target": "rm -rf", "requires": null, "source": {"turn": null, "text": "No rm -rf. Ever.", "via": "llm"}}], "latency_s": 7.54}

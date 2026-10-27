@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "network", "target": null, "requires": null, "source": {"turn": null, "text": "you're not allowed to curl external sites", "via": "llm"}}], "latency_s": 6.46}

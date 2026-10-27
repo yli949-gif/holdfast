@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "force_push", "target": null, "requires": null, "source": {"turn": null, "text": "also \u2014 please don't force push, ever", "via": "llm"}}], "latency_s": 5.32}

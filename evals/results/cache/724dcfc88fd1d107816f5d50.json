@@ -1,0 +1,1 @@
+{"rules": [{"kind": "scope", "action": "edit_path", "target": "app/**", "requires": null, "source": {"turn": null, "text": "Only edit files under app/; everything else is read-only", "via": "llm"}}], "latency_s": 5.2}

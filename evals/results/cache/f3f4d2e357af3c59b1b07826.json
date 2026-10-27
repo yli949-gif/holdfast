@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "delete", "target": "node_modules", "requires": null, "source": {"turn": null, "text": "whatever you do, don't nuke node_modules", "via": "llm"}}], "latency_s": 5.35}

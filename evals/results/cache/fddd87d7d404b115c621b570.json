@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "delete", "target": null, "requires": "user_confirmed", "source": {"turn": null, "text": "I'd like to be asked prior to removal of any files or directories.", "via": "llm"}}], "latency_s": 5.64}

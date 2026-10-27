@@ -1,0 +1,1074 @@
+{
+  "model": "haiku",
+  "llm_latency_s": {
+    "median": 5.5,
+    "max": 8.1
+  },
+  "tiers": {
+    "pattern": {
+      "plain": {
+        "n": 33,
+        "exact_rate": 0.697,
+        "rule_recall": 0.694,
+        "spurious_on_negatives": 0
+      },
+      "paraphrase": {
+        "n": 45,
+        "exact_rate": 0.422,
+        "rule_recall": 0.426,
+        "spurious_on_negatives": 0
+      },
+      "negative": {
+        "n": 30,
+        "exact_rate": 1.0,
+        "rule_recall": null,
+        "spurious_on_negatives": 0
+      }
+    },
+    "llm": {
+      "plain": {
+        "n": 33,
+        "exact_rate": 0.879,
+        "rule_recall": 0.806,
+        "spurious_on_negatives": 0
+      },
+      "paraphrase": {
+        "n": 45,
+        "exact_rate": 0.778,
+        "rule_recall": 0.809,
+        "spurious_on_negatives": 0
+      },
+      "negative": {
+        "n": 30,
+        "exact_rate": 0.933,
+        "rule_recall": null,
+        "spurious_on_negatives": 2
+      }
+    },
+    "hybrid": {
+      "plain": {
+        "n": 33,
+        "exact_rate": 0.909,
+        "rule_recall": 0.917,
+        "spurious_on_negatives": 0
+      },
+      "paraphrase": {
+        "n": 45,
+        "exact_rate": 0.778,
+        "rule_recall": 0.872,
+        "spurious_on_negatives": 0
+      },
+      "negative": {
+        "n": 30,
+        "exact_rate": 0.933,
+        "rule_recall": null,
+        "spurious_on_negatives": 2
+      }
+    }
+  },
+  "mismatches": {
+    "pattern": [
+      [
+        "c-002",
+        "plain",
+        "if you need to delete anything, ask first",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-004",
+        "plain",
+        "the only directory you may change is lib/",
+        [
+          [
+            "scope",
+            "edit_path"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-012",
+        "plain",
+        "nothing goes to production without my explicit okay",
+        [
+          [
+            "confirm",
+            "touch_prod"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-022",
+        "plain",
+        "keep your edits inside src/ and tests/",
+        [
+          [
+            "scope",
+            "edit_path"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-024",
+        "plain",
+        "I want to review every deletion before it happens",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-027",
+        "plain",
+        "no docker commands without checking with me",
+        [
+          [
+            "confirm",
+            "run_cmd"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-028",
+        "plain",
+        "Don't run anything with kubectl",
+        [
+          [
+            "forbid",
+            "run_cmd"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-030",
+        "plain",
+        "no ssh-ing into anything",
+        [
+          [
+            "forbid",
+            "network"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-032",
+        "plain",
+        "Push only once I've confirmed",
+        [
+          [
+            "order",
+            "push"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-033",
+        "plain",
+        "Don't commit until I've reviewed the diff",
+        [
+          [
+            "order",
+            "commit"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "commit"
+          ]
+        ]
+      ],
+      [
+        "c-037",
+        "paraphrase",
+        "You must not delete file, ask me first, ok?",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "delete"
+          ]
+        ]
+      ],
+      [
+        "c-039",
+        "paraphrase",
+        "please to not push code to remote, I will do by myself",
+        [
+          [
+            "forbid",
+            "push"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-040",
+        "paraphrase",
+        "\u5fc5\u987b\u5148\u95ee\u6211\u518d\u5220\u9664 (ask me first before deleting)",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-042",
+        "paraphrase",
+        "\ud83d\udeab pushes \ud83d\udeab until I say so",
+        [
+          [
+            "confirm",
+            "push"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-043",
+        "paraphrase",
+        "\u2705 edits in src/   \u274c anything else",
+        [
+          [
+            "scope",
+            "edit_path"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-044",
+        "paraphrase",
+        "Refactor the auth module: split auth.py into auth/session.py and auth/tokens.py, keep the ",
+        [
+          [
+            "forbid",
+            "edit_path"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-045",
+        "paraphrase",
+        "Hey! So the task today is to get the flaky integration tests under control. Start by runni",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-046",
+        "paraphrase",
+        "Migrate the config loader to pydantic v2. Keep backwards compat for the old YAML keys. Oh ",
+        [
+          [
+            "forbid",
+            "install"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-047",
+        "paraphrase",
+        "not allowed: deleting tests, force pushing",
+        [
+          [
+            "forbid",
+            "delete"
+          ],
+          [
+            "forbid",
+            "force_push"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-049",
+        "paraphrase",
+        "I'd like to be asked prior to removal of any files or directories.",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-051",
+        "paraphrase",
+        "u can edit src only",
+        [
+          [
+            "scope",
+            "edit_path"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-052",
+        "paraphrase",
+        "Work in ./packages/core only",
+        [
+          [
+            "scope",
+            "edit_path"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-056",
+        "paraphrase",
+        "ok new rule: ask me before you push anything",
+        [
+          [
+            "confirm",
+            "push"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-058",
+        "paraphrase",
+        "Avoid `git push --force`; use --force-with-lease only if I approve",
+        [
+          [
+            "forbid",
+            "force_push"
+          ]
+        ],
+        [
+          [
+            "confirm",
+            "run_cmd"
+          ]
+        ]
+      ],
+      [
+        "c-062",
+        "paraphrase",
+        "any destructive git op (reset --hard, clean, branch -D) needs my go-ahead",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "confirm",
+            "delete"
+          ],
+          [
+            "confirm",
+            "force_push"
+          ]
+        ]
+      ],
+      [
+        "c-063",
+        "paraphrase",
+        "Can you make sure you don't commit anything? I'll commit myself.",
+        [
+          [
+            "forbid",
+            "commit"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-065",
+        "paraphrase",
+        "Before you push, run pytest and make sure it's green",
+        [
+          [
+            "order",
+            "push"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-066",
+        "paraphrase",
+        "Tests first, then commit",
+        [
+          [
+            "order",
+            "commit"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-068",
+        "paraphrase",
+        "Don't `pip install` anything, use the venv as-is",
+        [
+          [
+            "forbid",
+            "install"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-070",
+        "paraphrase",
+        "leave the README alone",
+        [
+          [
+            "forbid",
+            "edit_path"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-071",
+        "paraphrase",
+        "no touching the CI config",
+        [
+          [
+            "forbid",
+            "edit_path"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-072",
+        "paraphrase",
+        "if it needs sudo or apt, stop and ask",
+        [
+          [
+            "confirm",
+            "install"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-073",
+        "paraphrase",
+        "absolutely no git push -f, and ask before plain pushes too",
+        [
+          [
+            "confirm",
+            "push"
+          ],
+          [
+            "forbid",
+            "force_push"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-075",
+        "paraphrase",
+        "Wait, one more thing before you start: no network access from this box, so don't bother wi",
+        [
+          [
+            "forbid",
+            "network"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-076",
+        "paraphrase",
+        "edits are fine but every rm goes through me",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-077",
+        "paraphrase",
+        "the prod cluster is read-only for you; staging is fair game",
+        [
+          [
+            "forbid",
+            "touch_prod"
+          ]
+        ],
+        []
+      ]
+    ],
+    "llm": [
+      [
+        "c-003",
+        "plain",
+        "unless I say otherwise, no pushes",
+        [
+          [
+            "forbid",
+            "push"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-005",
+        "plain",
+        "No rm -rf. Ever.",
+        [
+          [
+            "forbid",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "run_cmd"
+          ]
+        ]
+      ],
+      [
+        "c-016",
+        "plain",
+        "Check with me before adding dependencies",
+        [
+          [
+            "confirm",
+            "install"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-023",
+        "plain",
+        "rm is banned",
+        [
+          [
+            "forbid",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "run_cmd"
+          ]
+        ]
+      ],
+      [
+        "c-037",
+        "paraphrase",
+        "You must not delete file, ask me first, ok?",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "confirm",
+            "any"
+          ],
+          [
+            "forbid",
+            "delete"
+          ]
+        ]
+      ],
+      [
+        "c-044",
+        "paraphrase",
+        "Refactor the auth module: split auth.py into auth/session.py and auth/tokens.py, keep the ",
+        [
+          [
+            "forbid",
+            "edit_path"
+          ]
+        ],
+        [
+          [
+            "scope",
+            "edit_path"
+          ]
+        ]
+      ],
+      [
+        "c-050",
+        "paraphrase",
+        "please dont remove the fixtures under tests/fixtures",
+        [
+          [
+            "forbid",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "edit_path"
+          ]
+        ]
+      ],
+      [
+        "c-058",
+        "paraphrase",
+        "Avoid `git push --force`; use --force-with-lease only if I approve",
+        [
+          [
+            "forbid",
+            "force_push"
+          ]
+        ],
+        [
+          [
+            "confirm",
+            "force_push"
+          ],
+          [
+            "forbid",
+            "force_push"
+          ]
+        ]
+      ],
+      [
+        "c-062",
+        "paraphrase",
+        "any destructive git op (reset --hard, clean, branch -D) needs my go-ahead",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "confirm",
+            "run_cmd"
+          ]
+        ]
+      ],
+      [
+        "c-064",
+        "paraphrase",
+        "don't deploy",
+        [
+          [
+            "forbid",
+            "touch_prod"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "push"
+          ]
+        ]
+      ],
+      [
+        "c-066",
+        "paraphrase",
+        "Tests first, then commit",
+        [
+          [
+            "order",
+            "commit"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-070",
+        "paraphrase",
+        "leave the README alone",
+        [
+          [
+            "forbid",
+            "edit_path"
+          ]
+        ],
+        [
+          [
+            "scope",
+            "edit_path"
+          ]
+        ]
+      ],
+      [
+        "c-075",
+        "paraphrase",
+        "Wait, one more thing before you start: no network access from this box, so don't bother wi",
+        [
+          [
+            "forbid",
+            "network"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-077",
+        "paraphrase",
+        "the prod cluster is read-only for you; staging is fair game",
+        [
+          [
+            "forbid",
+            "touch_prod"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "touch_prod"
+          ],
+          [
+            "scope",
+            "edit_path"
+          ]
+        ]
+      ],
+      [
+        "c-090",
+        "negative",
+        "go ahead and push to origin when you're done",
+        [],
+        [
+          [
+            "order",
+            "push"
+          ]
+        ]
+      ],
+      [
+        "c-094",
+        "negative",
+        "the user must confirm before the app deletes their data",
+        [],
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ]
+      ]
+    ],
+    "hybrid": [
+      [
+        "c-005",
+        "plain",
+        "No rm -rf. Ever.",
+        [
+          [
+            "forbid",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "delete"
+          ],
+          [
+            "forbid",
+            "run_cmd"
+          ]
+        ]
+      ],
+      [
+        "c-023",
+        "plain",
+        "rm is banned",
+        [
+          [
+            "forbid",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "delete"
+          ],
+          [
+            "forbid",
+            "run_cmd"
+          ]
+        ]
+      ],
+      [
+        "c-033",
+        "plain",
+        "Don't commit until I've reviewed the diff",
+        [
+          [
+            "order",
+            "commit"
+          ]
+        ],
+        [
+          [
+            "confirm",
+            "commit"
+          ],
+          [
+            "forbid",
+            "commit"
+          ]
+        ]
+      ],
+      [
+        "c-037",
+        "paraphrase",
+        "You must not delete file, ask me first, ok?",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "confirm",
+            "any"
+          ],
+          [
+            "forbid",
+            "delete"
+          ]
+        ]
+      ],
+      [
+        "c-044",
+        "paraphrase",
+        "Refactor the auth module: split auth.py into auth/session.py and auth/tokens.py, keep the ",
+        [
+          [
+            "forbid",
+            "edit_path"
+          ]
+        ],
+        [
+          [
+            "scope",
+            "edit_path"
+          ]
+        ]
+      ],
+      [
+        "c-050",
+        "paraphrase",
+        "please dont remove the fixtures under tests/fixtures",
+        [
+          [
+            "forbid",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "delete"
+          ],
+          [
+            "forbid",
+            "edit_path"
+          ]
+        ]
+      ],
+      [
+        "c-058",
+        "paraphrase",
+        "Avoid `git push --force`; use --force-with-lease only if I approve",
+        [
+          [
+            "forbid",
+            "force_push"
+          ]
+        ],
+        [
+          [
+            "confirm",
+            "force_push"
+          ],
+          [
+            "confirm",
+            "run_cmd"
+          ],
+          [
+            "forbid",
+            "force_push"
+          ]
+        ]
+      ],
+      [
+        "c-062",
+        "paraphrase",
+        "any destructive git op (reset --hard, clean, branch -D) needs my go-ahead",
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ],
+        [
+          [
+            "confirm",
+            "delete"
+          ],
+          [
+            "confirm",
+            "force_push"
+          ],
+          [
+            "confirm",
+            "run_cmd"
+          ]
+        ]
+      ],
+      [
+        "c-064",
+        "paraphrase",
+        "don't deploy",
+        [
+          [
+            "forbid",
+            "touch_prod"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "push"
+          ],
+          [
+            "forbid",
+            "touch_prod"
+          ]
+        ]
+      ],
+      [
+        "c-066",
+        "paraphrase",
+        "Tests first, then commit",
+        [
+          [
+            "order",
+            "commit"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-070",
+        "paraphrase",
+        "leave the README alone",
+        [
+          [
+            "forbid",
+            "edit_path"
+          ]
+        ],
+        [
+          [
+            "scope",
+            "edit_path"
+          ]
+        ]
+      ],
+      [
+        "c-075",
+        "paraphrase",
+        "Wait, one more thing before you start: no network access from this box, so don't bother wi",
+        [
+          [
+            "forbid",
+            "network"
+          ]
+        ],
+        []
+      ],
+      [
+        "c-077",
+        "paraphrase",
+        "the prod cluster is read-only for you; staging is fair game",
+        [
+          [
+            "forbid",
+            "touch_prod"
+          ]
+        ],
+        [
+          [
+            "forbid",
+            "touch_prod"
+          ],
+          [
+            "scope",
+            "edit_path"
+          ]
+        ]
+      ],
+      [
+        "c-090",
+        "negative",
+        "go ahead and push to origin when you're done",
+        [],
+        [
+          [
+            "order",
+            "push"
+          ]
+        ]
+      ],
+      [
+        "c-094",
+        "negative",
+        "the user must confirm before the app deletes their data",
+        [],
+        [
+          [
+            "confirm",
+            "delete"
+          ]
+        ]
+      ]
+    ]
+  }
+}

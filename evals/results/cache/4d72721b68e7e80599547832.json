@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "delete", "target": null, "requires": "user_confirmed", "source": {"turn": null, "text": "the user must confirm before the app deletes their data", "via": "llm"}}], "latency_s": 5.11}

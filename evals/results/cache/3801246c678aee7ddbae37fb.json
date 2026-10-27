@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "edit_path", "target": ".github/**", "requires": null, "source": {"turn": null, "text": "hands off the .github folder", "via": "llm"}}], "latency_s": 5.86}

@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "run_cmd", "target": "terraform apply", "requires": null, "source": {"turn": null, "text": "never run terraform apply", "via": "llm"}}], "latency_s": 6.96}

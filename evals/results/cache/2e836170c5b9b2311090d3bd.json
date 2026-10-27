@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "network", "target": "ssh", "requires": null, "source": {"turn": null, "text": "no ssh-ing into anything", "via": "llm"}}], "latency_s": 7.19}

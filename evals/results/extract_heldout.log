@@ -1,0 +1,10 @@
+model=haiku llm latency median=5.5s
+  pattern  plain      n= 33 exact=0.697 recall=0.694 spurious_neg=0
+  pattern  paraphrase n= 45 exact=0.422 recall=0.426 spurious_neg=0
+  pattern  negative   n= 30 exact=1.000 recall=None spurious_neg=0
+  llm      plain      n= 33 exact=0.879 recall=0.806 spurious_neg=0
+  llm      paraphrase n= 45 exact=0.778 recall=0.809 spurious_neg=0
+  llm      negative   n= 30 exact=0.933 recall=None spurious_neg=2
+  hybrid   plain      n= 33 exact=0.909 recall=0.917 spurious_neg=0
+  hybrid   paraphrase n= 45 exact=0.778 recall=0.872 spurious_neg=0
+  hybrid   negative   n= 30 exact=0.933 recall=None spurious_neg=2

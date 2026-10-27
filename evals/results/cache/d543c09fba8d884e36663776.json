@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "delete", "target": null, "requires": "user_confirmed", "source": {"turn": null, "text": "edits are fine but every rm goes through me", "via": "llm"}}], "latency_s": 5.96}

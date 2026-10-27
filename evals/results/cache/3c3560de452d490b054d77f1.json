@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "delete", "target": "tests/**", "requires": null, "source": {"turn": null, "text": "not allowed: deleting tests, force pushing", "via": "llm"}}, {"kind": "forbid", "action": "force_push", "target": null, "requires": null, "source": {"turn": null, "text": "not allowed: deleting tests, force pushing", "via": "llm"}}], "latency_s": 5.14}

@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "commit", "target": null, "requires": null, "source": {"turn": null, "text": "Can you make sure you don't commit anything? I'll commit myself.", "via": "llm"}}], "latency_s": 5.65}

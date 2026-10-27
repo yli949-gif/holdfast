@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "push", "target": null, "requires": "user_confirmed", "source": {"turn": null, "text": "Push only once I've confirmed", "via": "llm"}}], "latency_s": 5.06}

@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "install", "target": null, "requires": null, "source": {"turn": null, "text": "No new deps. If it's not in requirements.txt already, don't use it.", "via": "llm"}}], "latency_s": 5.25}

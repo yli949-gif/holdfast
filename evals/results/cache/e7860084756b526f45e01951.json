@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "install", "target": null, "requires": null, "source": {"turn": null, "text": "Migrate the config loader to pydantic v2. Keep backwards compat for the old YAML keys. Oh and we're on a locked-down CI image so no pip installs, everything you need is already there.", "via": "llm"}}], "latency_s": 6.63}

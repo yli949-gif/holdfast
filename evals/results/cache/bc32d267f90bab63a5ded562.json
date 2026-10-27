@@ -1,0 +1,1 @@
+{"rules": [{"kind": "order", "action": "push", "target": "origin", "requires": "tests_passed", "source": {"turn": null, "text": "go ahead and push to origin when you're done", "via": "llm"}}], "latency_s": 5.5}

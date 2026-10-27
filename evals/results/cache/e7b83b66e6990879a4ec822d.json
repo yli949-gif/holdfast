@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "network", "target": null, "requires": null, "source": {"turn": null, "text": "No network calls please, we're offline", "via": "llm"}}], "latency_s": 4.88}

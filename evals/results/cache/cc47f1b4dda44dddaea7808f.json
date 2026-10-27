@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "touch_prod", "target": null, "requires": "user_confirmed", "source": {"turn": null, "text": "nothing goes to production without my explicit okay", "via": "llm"}}], "latency_s": 7.24}

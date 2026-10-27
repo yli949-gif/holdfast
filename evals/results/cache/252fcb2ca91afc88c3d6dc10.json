@@ -1,0 +1,1 @@
+{"rules": [{"kind": "scope", "action": "edit_path", "target": "lib/**", "requires": null, "source": {"turn": null, "text": "the only directory you may change is lib/", "via": "llm"}}], "latency_s": 7.46}

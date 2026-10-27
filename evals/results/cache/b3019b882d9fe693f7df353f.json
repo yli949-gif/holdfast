@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "commit", "target": null, "requires": "user_confirmed", "source": {"turn": null, "text": "Don't commit until I've reviewed the diff", "via": "llm"}}], "latency_s": 6.31}

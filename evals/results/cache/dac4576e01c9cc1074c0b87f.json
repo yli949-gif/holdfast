@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "run_cmd", "target": "kubectl", "requires": null, "source": {"turn": null, "text": "Don't run anything with kubectl", "via": "llm"}}], "latency_s": 6.02}

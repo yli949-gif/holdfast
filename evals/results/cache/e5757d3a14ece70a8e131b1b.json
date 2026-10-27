@@ -1,0 +1,1 @@
+{"rules": [{"kind": "scope", "action": "edit_path", "target": "!README*", "requires": null, "source": {"turn": null, "text": "leave the README alone", "via": "llm"}}], "latency_s": 4.99}

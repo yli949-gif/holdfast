@@ -1,0 +1,1 @@
+{"rules": [{"kind": "scope", "action": "edit_path", "target": "frontend/**", "requires": null, "source": {"turn": null, "text": "stick to the frontend/ directory", "via": "llm"}}], "latency_s": 5.67}

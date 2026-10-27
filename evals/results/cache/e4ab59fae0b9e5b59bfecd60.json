@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "force_push", "target": null, "requires": null, "source": {"turn": null, "text": "no force pushes and no installing new packages", "via": "llm"}}, {"kind": "forbid", "action": "install", "target": null, "requires": null, "source": {"turn": null, "text": "no force pushes and no installing new packages", "via": "llm"}}], "latency_s": 4.67}

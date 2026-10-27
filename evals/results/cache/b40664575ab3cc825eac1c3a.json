@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "push", "target": null, "requires": null, "source": {"turn": null, "text": "\ud83d\udeab pushes \ud83d\udeab until I say so", "via": "llm"}}], "latency_s": 5.66}

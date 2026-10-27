@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "edit_path", "target": "db/migrations/**", "requires": null, "source": {"turn": null, "text": "Changes to anything in db/migrations are forbidden", "via": "llm"}}], "latency_s": 6.32}

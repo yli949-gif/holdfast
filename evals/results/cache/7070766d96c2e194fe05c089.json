@@ -1,0 +1,1 @@
+{"rules": [{"kind": "scope", "action": "edit_path", "target": "packages/core/**", "requires": null, "source": {"turn": null, "text": "Work in ./packages/core only", "via": "llm"}}], "latency_s": 5.2}

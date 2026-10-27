@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "touch_prod", "target": null, "requires": null, "source": {"turn": null, "text": "stay out of prod", "via": "llm"}}], "latency_s": 6.56}

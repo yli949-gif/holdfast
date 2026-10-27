@@ -1,0 +1,1 @@
+{"rules": [{"kind": "confirm", "action": "push", "target": "main", "requires": "user_confirmed", "source": {"turn": null, "text": "treat main as production \u2014 so don't push there without asking", "via": "llm"}}], "latency_s": 4.92}

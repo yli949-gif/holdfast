@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "edit_path", "target": ".github/workflows/**", "requires": null, "source": {"turn": null, "text": "no touching the CI config", "via": "llm"}}], "latency_s": 6.91}

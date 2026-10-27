@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "install", "target": null, "requires": null, "source": {"turn": null, "text": "\u4e0d\u8981\u5b89\u88c5\u65b0\u7684\u5305 \u2014 no install new package", "via": "llm"}}], "latency_s": 5.67}

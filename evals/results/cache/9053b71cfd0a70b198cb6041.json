@@ -1,0 +1,1 @@
+{"rules": [{"kind": "scope", "action": "edit_path", "target": "src/**", "requires": null, "source": {"turn": null, "text": "\u2705 edits in src/   \u274c anything else", "via": "llm"}}], "latency_s": 6.52}

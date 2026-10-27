@@ -1,0 +1,1 @@
+{"rules": [{"kind": "forbid", "action": "push", "target": null, "requires": null, "source": {"turn": null, "text": "Kindly refrain from pushing to the remote repository during this session.", "via": "llm"}}], "latency_s": 5.72}
