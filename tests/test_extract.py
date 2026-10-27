@@ -204,6 +204,136 @@ def test_pronoun_refusal_is_not_a_rule():
     assert extract("no, don't remove that") == []
 
 
+# --- corpus sentences that the first extractor missed (corpus/constraints.jsonl) ------------
+
+CORPUS_FIXED = [
+    # order: tests_ok before push/commit in every phrasing
+    ("commit only after running pytest", {("order", "commit", None, "tests_passed")}),
+    ("run the tests before every commit", {("order", "commit", None, "tests_passed")}),
+    ("Before you push, the test suite must pass.", {("order", "push", None, "tests_passed")}),
+    ("Rule: tests must be run and pass before any push.", {("order", "push", None, "tests_passed")}),
+    ("pls make sure pytest is green before u commit", {("order", "commit", None, "tests_passed")}),
+    ("Only commit once the tests are passing", {("order", "commit", None, "tests_passed")}),
+    # confirm: askme cues
+    ("check with me before running kubectl", {("confirm", "run_cmd", "kubectl", None)}),
+    ("ask before touching production", {("confirm", "touch_prod", None, None)}),
+    ("don't push until I say so", {("confirm", "push", None, None)}),
+    ("Kindly refrain from pushing to the remote unless I explicitly approve.", {("confirm", "push", None, None)}),
+    ("Going forward, every push needs my sign-off.", {("confirm", "push", None, None)}),
+    ("I want to review before anything gets pushed", {("confirm", "push", None, None)}),
+    ("Confirm with me prior to any git push.", {("confirm", "push", None, None)}),
+    ("pls dont delete stuff w/o asking", {("confirm", "delete", None, None)}),
+    ("before delete any file, must ask me first", {("confirm", "delete", None, None)}),
+    ("Any deletion → ask first.", {("confirm", "delete", None, None)}),
+    ("let me know before you delete anything, ok?", {("confirm", "delete", None, None)}),
+    ("you may delete things but ask first", {("confirm", "delete", None, None)}),
+    ("Please ask for permission before you remove any file.", {("confirm", "delete", None, None)}),
+    ("don't push to main without checking with me", {("confirm", "push", "main", None)}),
+    # a push rule subsumes force_push (classify labels a force push as push + force_push)
+    ("One more thing — from here on, ask before any push or force push.", {("confirm", "push", None, None)}),
+    # forbid delete / install / commit / network / force push
+    ("never rm -rf", {("forbid", "delete", None, None)}),
+    ("deleting files is off limits", {("forbid", "delete", None, None)}),
+    ("No destructive git commands (reset --hard, clean, etc.)", {("forbid", "delete", None, None)}),
+    ("whatever you do, do not rm the data/ dir", {("forbid", "delete", "data", None)}),
+    ("from now on, no more installs", {("forbid", "install", None, None)}),
+    ("Dont instal anything new", {("forbid", "install", None, None)}),
+    ("I'd prefer you not install new dependencies for this task.", {("forbid", "install", None, None)}),
+    ("No apt-get, no pip install, nothing like that.", {("forbid", "install", None, None)}),
+    ("don't pull in new deps", {("forbid", "install", None, None)}),
+    ("donot push force, ever", {("forbid", "force_push", None, None)}),
+    ("NO FORCE PUSH", {("forbid", "force_push", None, None)}),
+    ("No commits — I'll commit myself.", {("forbid", "commit", None, None)}),
+    ("you are not allowed to run anything with curl or wget", {("forbid", "network", None, None)}),
+    ("Add logging to the request handler. Also: you are not allowed to run anything with curl or wget.",
+     {("forbid", "network", None, None)}),
+    # prod vs explicit path
+    ("Hands off production.", {("forbid", "touch_prod", None, None)}),
+    ("Do not run kubectl against the prod cluster.", {("forbid", "touch_prod", None, None)}),
+    ("don't deploy to prod", {("forbid", "touch_prod", None, None)}),
+    ("Don't touch the prod config (config/prod.yml)", {("forbid", "edit_path", "config/prod.yml", None)}),
+    ("do not edit config/production.yml", {("forbid", "edit_path", "config/production.yml", None)}),
+    ("Do not overwrite README.md", {("forbid", "edit_path", "README.md", None)}),
+    ("never ever touch anything in the .github folder", {("forbid", "edit_path", ".github", None)}),
+    ("Stay out of the tests directory.", {("forbid", "edit_path", "tests", None)}),
+    ("You can edit anything except the migrations folder.", {("forbid", "edit_path", "migrations", None)}),
+    ("Please refactor auth.py. Oh and don't touch anything under tests/ — I'll handle those.",
+     {("forbid", "edit_path", "tests", None)}),
+    # scope
+    ("Keep your edits to src/api/ only.", {("scope", "edit_path", "src/api", None)}),
+    ("Avoid making changes to files outside of packages/core/.", {("scope", "edit_path", "packages/core", None)}),
+    ("Work only inside the frontend/ directory.", {("scope", "edit_path", "frontend", None)}),
+    # antecedents: a path earlier in the message scopes a pronoun / demonstrative
+    ("Fix the flaky test in tests/test_io.py, but don't delete it.", {("forbid", "delete", "tests/test_io.py", None)}),
+    ("Implement the cache layer in src/cache/. Stay within that folder and don't pull in new deps.",
+     {("scope", "edit_path", "src/cache", None), ("forbid", "install", None, None)}),
+    # two rules in one sentence
+    ("no deleting, no force pushing", {("forbid", "delete", None, None), ("forbid", "force_push", None, None)}),
+    ("ask before you delete or install anything", {("confirm", "delete", None, None), ("confirm", "install", None, None)}),
+]
+
+CORPUS_NEGATIVES = [
+    "delete the unused imports", "push your changes when done", "remove the tests for the old API",
+    "install pytest and run it", "the prod config lives in config/prod.yml", "force push is fine here, the branch is mine",
+    "can you delete the build dir and rerun?", "we deleted the staging cluster last week", "the network module is in src/net.py",
+    "curl the health endpoint and tell me what it returns", "run docker compose up and check the logs", "rm the .pyc files please",
+    "go ahead and push", "the previous engineer asked us not to delete logs, but that's no longer relevant",
+    "git push origin main failed yesterday, can you check why?", "What does 'force push' mean?", "add a test that deletes a temp file",
+    "I don't think we need to delete anything for this task", "edit tests/test_auth.py to cover the new endpoint",
+    "make sure the tests pass", "Install ripgrep if it's missing.", "touch src/__init__.py",
+    "run kubectl get pods -n prod and paste the output", "No, the other one.",
+    # extra traps: filler "no", task verbs after a non-action head, cue words used literally
+    "no worries, push whenever", "never mind, push it", "don't forget to run the tests", "don't worry about prod for now",
+    "no need to run the full suite", "check the logs and tell me what you see", "let me know when the tests pass",
+    "only the parser is broken", "keep it simple", "stay focused on the parser", "leave a comment explaining why",
+    "ask the user for their name in the CLI", "confirm the email address format with a regex", "avoid the temptation to over-engineer",
+    "You can delete the build dir if you want.", "feel free to install whatever you need", "prod is down", "tests pass",
+]
+
+
+@pytest.mark.parametrize("text,expected", CORPUS_FIXED, ids=[p[0][:40] for p in CORPUS_FIXED])
+def test_corpus_paraphrases(text, expected):
+    got = _tuples(extract(text))
+    assert got == expected, f"{text!r}: got {got}"
+
+
+@pytest.mark.parametrize("text", CORPUS_NEGATIVES)
+def test_corpus_negatives_yield_no_rule(text):
+    assert extract(text) == [], text
+
+
+def test_scoped_pronoun_needs_antecedent_in_same_message():
+    assert extract("don't delete it") == []
+    assert _tuples(extract("Fix tests/test_io.py. Then don't delete it.")) == {("forbid", "delete", "tests/test_io.py", None)}
+
+
+def test_push_rule_subsumes_force_push():
+    assert _tuples(extract("ask before any push or force push")) == {("confirm", "push", None, None)}
+    # but a lone force-push rule, or one next to a different kind, survives
+    assert _tuples(extract("never force push; ask before pushing")) == {("forbid", "force_push", None, None),
+                                                                        ("confirm", "push", None, None)}
+
+
+@pytest.mark.parametrize("text,action", [
+    ("yes, but only the .pyc files", "any"), ("okay, but push to a feature branch, not main", "push"),
+    ("Yes please, and then run the tests", "any"), ("Go ahead and delete them. Then push.", "delete"),
+    ("proceed with caution", "any"), ("LGTM, ship it", "any"), ("yep, nuke it", "delete"),
+])
+def test_narrowed_and_followup_confirmations(text, action):
+    got = extract_confirmations(text)
+    assert got and got[0].action == action, (text, got)
+
+
+@pytest.mark.parametrize("text", [
+    "yes to the push, no to the force push", "yes I saw it, but don't delete yet", "go ahead with the refactor but not the deletion",
+    "sure, but hold off on the delete", "ok but first run the tests", "yes please but not the config", "yes?", "what would you delete exactly?",
+    "hold on, let me check", "I said no", "nah, leave it", "I'll delete it myself", "deleted", "the answer is no",
+    "yes the tests pass now", "Delete the old migrations too", "no don't delete, just move them",
+])
+def test_contrastive_or_deferred_answers_are_not_confirmations(text):
+    assert extract_confirmations(text) == [], text
+
+
 # --- LLM extractor (stubbed; never calls the network in tests) -----------------------------
 
 def test_llm_prompt_is_strict_json_schema():
