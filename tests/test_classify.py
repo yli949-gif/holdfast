@@ -101,7 +101,7 @@ def test_push(proj):
     acts = bash("git push origin main", proj)
     assert "push" in cats(acts) and "force_push" not in cats(acts)
     assert "main" in by(acts, "push")[0].paths
-    assert "network" in cats(acts)
+    assert "network" not in cats(acts)  # git transport is scored separately from network
 
 
 @pytest.mark.parametrize("cmd", ["git push -f", "git push --force origin main", "git push --force-with-lease",
@@ -153,10 +153,49 @@ def test_git_apply_and_patch_without_file(proj):
     assert "edit_path" in cats(bash("patch -p1 < fix.diff", proj))
 
 
-def test_mv_source_counts_as_edit(proj):
-    acts = by(bash("mv tests/test_a.py /tmp/", proj), "edit_path")
-    paths = [p for a in acts for p in a.paths]
-    assert os.path.join(proj, "tests/test_a.py") in paths
+def test_mv_source_is_delete_dest_edit_only_inside_project(proj):
+    acts = bash("mv tests/test_a.py /tmp/", proj)
+    assert [a.paths for a in by(acts, "delete")] == [[os.path.join(proj, "tests/test_a.py")]]
+    assert not by(acts, "edit_path")
+    acts = bash("mv src/a.py tests/b.py", proj)
+    assert by(acts, "delete")[0].paths == [os.path.join(proj, "src/a.py")]
+    assert by(acts, "edit_path")[0].paths == [os.path.join(proj, "tests/b.py")]
+
+
+def test_git_no_network_and_dry_runs(proj):
+    for cmd in ["git fetch", "git pull", "git clone https://x", "git remote -v", "git push"]:
+        assert "network" not in cats(bash(cmd, proj)), cmd
+    assert cats(bash("git push --dry-run", proj)) == {"run_cmd"}
+    assert cats(bash("git commit --dry-run", proj)) == {"run_cmd"}
+    assert cats(bash("git rm --cached big.bin", proj)) == {"run_cmd"}
+    assert cats(bash("rm --help", proj)) == {"run_cmd"}
+    assert cats(bash("man rm", proj)) == {"run_cmd"}
+
+
+def test_git_checkout_from_ref_is_edit(proj):
+    acts = bash("git checkout other-branch -- tests/", proj)
+    assert "delete" not in cats(acts)
+    assert by(acts, "edit_path")[0].paths == [os.path.join(proj, "tests")]
+
+
+def test_pure_truncation_is_delete_even_if_missing(proj):
+    for cmd in [": > logs/app.log", "> logs/app.log", "truncate -s 0 logs/app.log", "true > logs/app.log"]:
+        acts = bash(cmd, proj)
+        assert "delete" in cats(acts) and "edit_path" in cats(acts), cmd
+    assert "delete" not in cats(bash("echo hi > logs/app.log", proj))
+
+
+@pytest.mark.parametrize("cmd", ["kubectl --namespace=prod delete pod x", "aws --profile prod s3 rm s3://b/k",
+                                 "aws ec2 delete-volume --volume-id v", "gcloud compute instances delete x",
+                                 "gh repo delete me/x", "heroku apps:destroy -a x", "kubectl delete -f k8s/"])
+def test_remote_resource_deletion(cmd, proj):
+    d = by(bash(cmd, proj), "delete")
+    assert d and d[0].paths == [], cmd
+    assert "delete" not in cats(bash("kubectl get pods", proj))
+
+
+def test_interpreter_string_literal_is_not_delete(proj):
+    assert cats(bash("python -c \"print('rm -rf')\"", proj)) == {"run_cmd"}
 
 
 @pytest.mark.parametrize("tool,inp", [
@@ -194,8 +233,7 @@ def test_run_cmd_every_simple(proj):
 # --- network / install ------------------------------------------------------------------
 
 @pytest.mark.parametrize("cmd", ["curl http://x", "wget http://x", "nc -l 80", "ssh host ls", "scp a host:b",
-                                 "rsync -a src/ host:/dst", "pip install x", "npm install", "git fetch",
-                                 "git clone https://x", "git pull"])
+                                 "rsync -a src/ host:/dst", "pip install x", "npm install", "npx some-pkg"])
 def test_network(cmd, proj):
     assert "network" in cats(bash(cmd, proj)), cmd
 
@@ -229,22 +267,30 @@ def test_touch_prod_markers(cmd, proj):
     assert acts and acts[0].confidence >= 0.7, cmd
 
 
-def test_touch_prod_not_in_ordinary(proj):
-    for cmd in ["ls product/", "cat productivity.md", "npm run build", "git status"]:
-        assert not [a for a in by(bash(cmd, proj), "touch_prod") if a.confidence >= 0.6], cmd
+def test_touch_prod_not_in_ordinary_or_readonly(proj):
+    for cmd in ["ls product/", "cat productivity.md", "npm run build", "git status", "head -n 20 config/prod.yml",
+                "cat config/production.yml", 'grep -rn "production" src/', "echo production", "git push origin main",
+                "ls config/prod", "diff a prod.yml", "which prod-tool"]:
+        assert not by(bash(cmd, proj), "touch_prod"), cmd
 
 
-def test_push_to_main_is_weak_prod(proj):
-    acts = by(bash("git push origin main", proj), "touch_prod")
-    assert acts and acts[0].confidence < 0.6 and "main" in acts[0].paths
+@pytest.mark.parametrize("cmd", ["./deploy.sh production", "npm run deploy -- --prod", "DATABASE_URL=postgres://prod-db/app python migrate.py",
+                                 "kubectl --context prod-cluster get pods", "heroku run --app myapp-prod bash",
+                                 "ssh prod1 'systemctl restart app'", "kubectl -n prod get pods"])
+def test_touch_prod_mutating(cmd, proj):
+    acts = by(bash(cmd, proj), "touch_prod")
+    assert acts and acts[0].confidence >= 0.7, cmd
 
 
-def test_edit_prod_path(proj):
-    acts = by(classify("Edit", {"file_path": "config/production.yaml", "old_string": "a", "new_string": "b"}, proj),
-              "touch_prod")
-    assert acts and acts[0].confidence >= 0.7
-    acts = by(classify("Edit", {"file_path": "src/a.py", "old_string": "a", "new_string": "b"}, proj), "touch_prod")
-    assert acts and acts[0].confidence < 0.6  # only matchable via an explicit target glob
+@pytest.mark.parametrize("path,exp", [("config/production.yaml", True), ("config/prod.yml", True), ("prod/settings.py", True),
+                                      ("config/production.local.yml", True), ("deploy/prod-values.yaml", True),
+                                      ("src/production_utils.py", False), ("src/a.py", False), ("README.md", False),
+                                      ("src/tests_helper.py", False), ("docs/products.md", False)])
+def test_edit_prod_path(path, exp, proj):
+    acts = by(classify("Edit", {"file_path": path, "old_string": "a", "new_string": "b"}, proj), "touch_prod")
+    assert bool(acts) is exp, path
+    if exp:
+        assert acts[0].confidence >= 0.7
 
 
 # --- opaque -----------------------------------------------------------------------------
@@ -272,9 +318,11 @@ def test_action_is_dataclass_with_fields():
 # --- adversarial extras found by probing --------------------------------------------------------
 
 def test_dynamic_git_subcommand_is_opaque(proj):
-    for cmd in ["git $(echo push)", "git ${X:-push}", "g=git; $g push"]:
+    for cmd in ["git $(cat sub.txt)", "git ${X:-push}", "$g push"]:
         acts = bash(cmd, proj)
         assert any(a.opaque and a.category == "push" for a in acts), cmd
+    for cmd in ["git $(echo push)", "g=git; $g push"]:
+        assert any(not a.opaque and a.category == "push" for a in bash(cmd, proj)), cmd
 
 
 @pytest.mark.parametrize("cmd,rel", [

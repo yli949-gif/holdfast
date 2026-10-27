@@ -110,8 +110,11 @@ def rule_applies(rule: Rule, action: Action, cwd: str) -> bool:
         return False
     cat = action.category
     if rule.action != "any" and rule.action != cat:
-        # a targeted edit_path rule also covers deleting those files
-        if not (rule.action == "edit_path" and cat == "delete" and rule.target):
+        # a targeted edit_path rule also covers deleting those files; a targeted touch_prod rule
+        # ("prod is config/prod*" / "prod is main") covers edits/deletes under that glob and pushes to that branch
+        covers = (rule.action == "edit_path" and cat == "delete" and rule.target) or \
+                 (rule.action == "touch_prod" and rule.target and cat in ("edit_path", "delete", "push", "force_push"))
+        if not covers:
             return False
     if rule.target:
         if cat in PATH_CATEGORIES:

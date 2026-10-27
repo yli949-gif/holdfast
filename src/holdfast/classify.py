@@ -27,10 +27,31 @@ EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 DELETE_CMDS = {"rm", "rmdir", "unlink", "shred", "trash", "trash-put", "gio-trash"}
 NET_CMDS = {"curl", "wget", "nc", "ncat", "netcat", "ssh", "scp", "sftp", "telnet", "ftp", "http",
             "https", "socat", "gh", "aws", "gcloud", "az", "httpie", "ping"}
-GIT_NET = {"push", "fetch", "pull", "clone", "ls-remote", "remote"}
 PROD_RX = re.compile(r"(^|[^a-z])(prod|production|prd)([^a-z]|$)", re.I)
+PROD_PATH_RX = re.compile(r"^(prod|production|prd)([.-]|$)", re.I)
 TEST_EXT = re.compile(r"\.\w{1,5}$")
-PATH_ONLY_CONF = 0.3   # emitted so target globs can match; never blocks a targetless rule
+# Commands that act on infrastructure: a prod marker in their arguments means "touching prod".
+INFRA_CMDS = {"kubectl", "helm", "terraform", "aws", "gcloud", "az", "heroku", "vercel", "ssh", "psql", "mysql",
+              "docker", "flyctl", "fly", "ansible", "ansible-playbook", "serverless", "sls", "wrangler", "firebase",
+              "netlify", "railway", "pulumi", "kustomize", "oc", "eb", "sam", "cdk", "mongosh", "mongo", "redis-cli",
+              "scp", "rsync", "sqlcmd", "pg_dump", "pg_restore", "mysqldump", "flyway", "liquibase", "alembic", "doctl",
+              "linode-cli", "supabase", "prisma", "dbt", "capistrano", "cap", "fab", "fabric"}
+# Read-only / text commands never touch prod, whatever their arguments say.
+READONLY_CMDS = {"cat", "head", "tail", "less", "more", "grep", "rg", "ag", "echo", "printf", "ls", "wc", "diff",
+                 "man", "which", "whereis", "type", "stat", "file", "tree", "sort", "uniq", "cut", "awk", "sed", "find",
+                 "fd", "du", "df", "env", "printenv", "pwd", "true", "false", ":", "test", "[", "basename", "dirname",
+                 "realpath", "readlink", "md5sum", "sha256sum", "jq", "yq", "bat", "column", "tr", "xxd", "od", "strings",
+                 "git", "pytest", "python", "python3", "node", "ruby", "perl", "go", "cargo", "make"}
+PROD_VALUE_FLAGS = {"-n", "--namespace", "--context", "--profile", "--env", "--environment", "-e", "--stage",
+                    "--cluster", "--project", "--app", "-a", "--target", "--host", "-h", "--remote", "--workspace"}
+REMOTE_DELETE = {  # cmd -> predicate on its argv (remote resource deletion, no local path)
+    "kubectl": lambda a: "delete" in a, "oc": lambda a: "delete" in a, "helm": lambda a: "uninstall" in a or "delete" in a,
+    "aws": lambda a: any(w == "rm" or w.startswith("delete-") or w in ("rb", "terminate-instances") for w in a),
+    "gcloud": lambda a: "delete" in a, "az": lambda a: "delete" in a,
+    "gh": lambda a: "delete" in a, "heroku": lambda a: any(w.endswith(":destroy") or w == "destroy" for w in a),
+    "terraform": lambda a: "destroy" in a, "pulumi": lambda a: "destroy" in a, "doctl": lambda a: "delete" in a,
+    "flyctl": lambda a: "destroy" in a, "fly": lambda a: "destroy" in a, "docker": lambda a: any(w in ("rm", "rmi", "prune") for w in a),
+}
 
 
 @dataclass
@@ -102,8 +123,9 @@ def _classify_git(s: Simple, home: str | None, out: list[Action]) -> None:
     opts = [a for a in rest if a.startswith("-")]
     args = [a for a in rest if not a.startswith("-")]
     ev = s.raw
-    if sub in GIT_NET:
-        out.append(Action("network", [], 0.9, False, ev))
+    # git transport is NOT scored as `network` (corpus: push/fetch have their own semantics).
+    if "--dry-run" in opts or ("-n" in opts and sub in ("push", "clean", "add")):
+        return
     if sub == "push":
         branch = args[1] if len(args) > 1 else (args[0] if args else "")
         paths = [p for p in [branch, "/".join(args[:2]) if len(args) > 1 else ""] if p]
@@ -115,21 +137,26 @@ def _classify_git(s: Simple, home: str | None, out: list[Action]) -> None:
             out.append(Action("force_push", paths, 1.0, False, ev))
         if "--delete" in opts or "-d" in opts or any(a.startswith(":") and len(a) > 1 for a in args):
             out.append(Action("delete", paths, 0.7, False, f"{ev} (deletes a remote branch)"))
-        if branch.lstrip("+") in ("main", "master", "production", "prod"):
-            out.append(Action("touch_prod", [branch.lstrip("+")], 0.5, False,
-                              f"{ev} (push to {branch}; counts as prod only if a rule targets it)"))
+        # Pushing to main/master is prod only when a touch_prod rule targets that branch; the
+        # engine matches targeted touch_prod rules against push branch names, so nothing is emitted here.
     elif sub == "commit":
         out.append(Action("commit", [], 1.0, False, ev))
     elif sub == "clean":
-        if not any(o in ("-n", "--dry-run") for o in opts) and not any(o.startswith("-n") for o in opts):
+        if not any(o.startswith("-n") for o in opts):
             out.append(Action("delete", _resolve(args or ["."], s, home), 0.9, False, f"{ev} (removes untracked files)"))
     elif sub == "rm":
-        out.append(Action("delete", _resolve(args, s, home), 0.9 if "--cached" not in opts else 0.6, False, ev))
+        if "--cached" not in opts:  # --cached leaves the file on disk (tc-237)
+            out.append(Action("delete", _resolve(args, s, home), 0.9, False, ev))
     elif sub == "checkout":
         if "--" in rest:
             paths = rest[rest.index("--") + 1:]
-            out.append(Action("delete", _resolve(paths or ["."], s, home), 0.85, False,
-                              f"{ev} (discards uncommitted changes)"))
+            before = [a for a in rest[:rest.index("--")] if not a.startswith("-")]
+            if before:  # git checkout <ref> -- <path>: overwrite from another ref (tc-172)
+                out.append(Action("edit_path", _resolve(paths or ["."], s, home), 0.85, False,
+                                  f"{ev} (overwrites files from {before[0]})"))
+            else:
+                out.append(Action("delete", _resolve(paths or ["."], s, home), 0.85, False,
+                                  f"{ev} (discards uncommitted changes)"))
         elif not any(o in ("-b", "-B", "--orphan", "-t", "--track") for o in opts):
             pathish = [a for a in args if a == "." or "/" in a or TEST_EXT.search(a)]
             if pathish:
@@ -165,8 +192,11 @@ def _classify_simple(s: Simple, home: str | None) -> list[Action]:
     # redirect / tee / dd writes
     for w in s.writes:
         out.append(Action("edit_path", [w], 0.95, False, f"{ev} writes to {w}"))
+    pure_truncation = cmd in ("", ":", "true") or (cmd == "cat" and s.argv[1:] == ["/dev/null"])
     for t in s.truncates:
-        if _is_existing_file(t):
+        if pure_truncation:  # `: > f`, `> f`: the only effect is emptying f (tc-023/024/152/153)
+            out.append(Action("delete", [t], 0.9, False, f"{ev} truncates {t}"))
+        elif _is_existing_file(t):
             out.append(Action("delete", [t], 0.8, False, f"{ev} truncates existing file {t}"))
 
     if s.opaque:
@@ -181,6 +211,8 @@ def _classify_simple(s: Simple, home: str | None) -> list[Action]:
     out.append(Action("run_cmd", [cmd, " ".join(s.argv)], 1.0, False, ev))
 
     args = _args(s.argv)
+    if "--help" in s.argv or "--version" in s.argv or cmd in ("man", "help", "info", "tldr"):
+        return out
     if cmd in DELETE_CMDS:
         if s.unknown_args and not args:
             out.append(Action("delete", list(s.guess_paths), 0.8, False, f"{ev} (paths come from stdin)"))
@@ -218,6 +250,8 @@ def _classify_simple(s: Simple, home: str | None) -> list[Action]:
             if not has_e and files:
                 files = files[1:]  # first positional is the script
             out.append(Action("edit_path", _resolve(files, s, home), 0.9, False, ev))
+    elif cmd in REMOTE_DELETE and REMOTE_DELETE[cmd](s.argv[1:]):
+        out.append(Action("delete", [], 0.8, False, f"{ev} (deletes a remote resource)"))
     elif cmd in ("cp", "mv", "install", "ln", "rsync"):
         remote = cmd == "rsync" and any(":" in a and not a.startswith("-") for a in args)
         if remote:
@@ -232,12 +266,15 @@ def _classify_simple(s: Simple, home: str | None) -> list[Action]:
             srcs = a2 if tgt_opt else a2[:-1]
             if dest is not None:
                 d = resolve_path(dest, s.cwd, home)
-                if cmd == "mv" and d in ("/dev/null",):
-                    out.append(Action("delete", _resolve(srcs, s, home), 0.9, False, ev))
+                if cmd == "mv":
+                    # mv = source removed + destination written; the write only counts inside the project
+                    # (corpus tc-052/154: moving out of the project is a plain removal).
+                    if srcs:
+                        out.append(Action("delete", _resolve(srcs, s, home), 0.8, False, f"{ev} (moves source away)"))
+                    if d != "/dev/null" and (d == s.cwd or d.startswith(s.cwd.rstrip("/") + "/")):
+                        out.append(Action("edit_path", [d], 0.9, False, f"{ev} writes to {d}"))
                 else:
                     out.append(Action("edit_path", [d], 0.9, False, f"{ev} writes to {d}"))
-                    if cmd == "mv" and srcs:
-                        out.append(Action("edit_path", _resolve(srcs, s, home), 0.7, False, f"{ev} moves away source"))
     elif cmd == "touch":
         out.append(Action("edit_path", _resolve(_args(s.argv, {"-d", "-t", "-r"}), s, home), 0.9, False, ev))
     elif cmd == "perl" and any(re.match(r"^-[pnlaw0-9]*i", a) for a in s.argv[1:]):
@@ -261,6 +298,10 @@ def _classify_simple(s: Simple, home: str | None) -> list[Action]:
         out.append(Action("network", [], 0.95 if cmd not in ("gh", "aws", "gcloud", "az", "ping") else 0.7, False, ev))
     elif cmd in ("docker", "podman") and args and args[0] in ("pull", "push", "login"):
         out.append(Action("network", [], 0.9, False, ev))
+    elif cmd in ("npx", "bunx", "pnpx"):
+        # Corpus (tc-190, debatable): npx may download and run an arbitrary package.
+        out.append(Action("install", [], 0.7, False, f"{ev} (may download a package)"))
+        out.append(Action("network", [], 0.7, False, f"{ev} (may download a package)"))
 
     _classify_install(cmd, s, out, ev)
     _classify_prod(cmd, s, out, ev)
@@ -299,18 +340,29 @@ def _classify_install(cmd: str, s: Simple, out: list[Action], ev: str) -> None:
 
 
 def _classify_prod(cmd: str, s: Simple, out: list[Action], ev: str) -> None:
+    """touch_prod only for commands that *act*: infra CLIs, deploy scripts, prod env vars, --prod flags."""
+    env_hits = [f"{k}={v}" for k, v in s.env.items() if PROD_RX.search(v) or PROD_RX.search(k)]
+    argv = s.argv[1:]
+    flag_hits = [a for a in argv if a.lstrip("-").lower() in ("prod", "production")
+                 or (a.startswith("--") and "=" in a and a.split("=", 1)[0] in PROD_VALUE_FLAGS and PROD_RX.search(a.split("=", 1)[1]))]
+    for i, a in enumerate(argv[:-1]):
+        if a in PROD_VALUE_FLAGS and PROD_RX.search(argv[i + 1]):
+            flag_hits.append(f"{a} {argv[i + 1]}")
+    arg_hits = [a for a in argv if PROD_RX.search(a) and not a.startswith("-")]
+    deployish = re.search(r"(deploy|release|publish|migrate|rollout|ship|provision)", cmd) is not None
     hits: list[str] = []
-    for k, v in s.env.items():
-        if PROD_RX.search(v) or PROD_RX.search(k):
-            hits.append(f"{k}={v}")
-    for a in s.argv[1:]:
-        if PROD_RX.search(a):
-            hits.append(a)
+    if env_hits:
+        hits += env_hits
+    if cmd in INFRA_CMDS or deployish:
+        hits += flag_hits + arg_hits
+    elif cmd not in READONLY_CMDS:
+        hits += flag_hits  # e.g. `npm run deploy -- --prod`, `./deploy.sh --prod`
+    if cmd in READONLY_CMDS and not env_hits:
+        return
     if hits:
-        strong = cmd in ("kubectl", "terraform", "vercel", "heroku", "helm", "flyctl", "fly", "aws", "gcloud",
-                         "az", "ansible", "ansible-playbook", "ssh", "docker", "serverless", "sls", "wrangler",
-                         "firebase", "netlify", "railway", "pulumi", "npm", "pnpm", "yarn", "make")
-        out.append(Action("touch_prod", hits, 0.9 if strong else 0.7, False, f"{ev} (prod marker: {', '.join(hits)})"))
+        strong = cmd in INFRA_CMDS or deployish or bool(env_hits)
+        out.append(Action("touch_prod", list(dict.fromkeys(hits)), 0.9 if strong else 0.7, False,
+                          f"{ev} (prod marker: {', '.join(dict.fromkeys(hits))})"))
 
 
 # ------------------------------------------------------------------ entry point
@@ -335,10 +387,11 @@ def classify(tool_name: str, tool_input: dict, cwd: str, home: str | None = None
         out = [Action("edit_path", [p], 1.0, False, f"{tool_name} {path}")]
         if tool_name == "Write" and tool_input.get("content", None) == "" and _is_existing_file(p):
             out.append(Action("delete", [p], 0.9, False, f"Write with empty content truncates existing file {path}"))
+        # touch_prod only when a path component or filename *is* prod/production (config/prod.yml), not
+        # when the word merely occurs (src/production_utils.py, tc-261). Rules with a target glob are
+        # matched by the engine against the edit_path path instead.
         rel = os.path.relpath(p, cwd) if p.startswith(cwd.rstrip("/") + "/") else p
-        if PROD_RX.search(rel):
-            out.append(Action("touch_prod", [p], 0.7, False, f"{tool_name} {path} (prod marker in path)"))
-        else:
-            out.append(Action("touch_prod", [p], PATH_ONLY_CONF, False, f"{tool_name} {path}"))
+        if any(PROD_PATH_RX.match(part) for part in rel.split("/")):
+            out.append(Action("touch_prod", [p], 0.7, False, f"{tool_name} {path} (prod path)"))
         return out
     return []

@@ -102,10 +102,12 @@ def test_push_target_matches_branch():
     assert evaluate(rules, st(), [Action("push", ["feature", "origin/feature"], 1.0)], CWD).decision == "allow"
 
 
-def test_touch_prod_weak_needs_target():
-    weak = Action("touch_prod", ["main"], 0.5)
-    assert evaluate([R(kind="forbid", action="touch_prod")], st(), [weak], CWD).decision == "allow"
-    assert evaluate([R(kind="forbid", action="touch_prod", target="main")], st(), [weak], CWD).decision == "deny"
+def test_targeted_touch_prod_rule_matches_push_branch_and_edit_paths():
+    push_main = Action("push", ["main", "origin/main"], 1.0)
+    assert evaluate([R(kind="forbid", action="touch_prod")], st(), [push_main], CWD).decision == "allow"
+    assert evaluate([R(kind="forbid", action="touch_prod", target="main")], st(), [push_main], CWD).decision == "deny"
+    assert evaluate([R(kind="forbid", action="touch_prod", target="config/prod*")], st(), [edit("config/prod.yml")], CWD).decision == "deny"
+    assert evaluate([R(kind="forbid", action="touch_prod", target="config/prod*")], st(), [edit("src/a.py")], CWD).decision == "allow"
     strong = Action("touch_prod", ["--prod"], 0.9)
     assert evaluate([R(kind="forbid", action="touch_prod")], st(), [strong], CWD).decision == "deny"
 

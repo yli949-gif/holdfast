@@ -26,8 +26,11 @@ they form the command name.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 import re
+import shlex
 from dataclasses import dataclass, field
 
 ALL_CATEGORIES = ("delete", "edit_path", "push", "force_push", "commit",
@@ -70,6 +73,7 @@ class Simple:
     evidence: str = ""
     unknown_args: bool = False
     via: list[str] = field(default_factory=list)
+    static_stdout: str | None = None   # output of echo/printf/base64 -d when statically known
 
     @property
     def cmd(self) -> str:
@@ -129,6 +133,7 @@ class _Seg:
     sep: str | None
     raw: str
     heredoc: str | None = None
+    herestring: str | None = None
 
 
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -154,6 +159,26 @@ def _match_paren(text: str, i: int) -> int:
     return i
 
 
+_STATIC_ECHO = re.compile(r"^\s*(?:echo|printf)\s+(?:-[neE]+\s+)?([^$`|;&<>()]+)$")
+
+
+def _static_subst(inner: str) -> str | None:
+    """`$(echo rm)` is statically `rm`; anything less trivial stays dynamic."""
+    m = _STATIC_ECHO.match(inner)
+    if not m:
+        return None
+    return " ".join(w.strip("'\"") for w in m.group(1).split())
+
+
+def _static_stdin(seg: "_Seg", prev: "Simple | None") -> str | None:
+    """Text a command reads on stdin when it is knowable: here-string, `echo X |`, `base64 -d` of a literal."""
+    if seg.herestring is not None:
+        return seg.herestring
+    if prev is None or seg.sep != "|":
+        return None
+    return prev.static_stdout
+
+
 def _lex(text: str) -> list[_Seg]:
     segs: list[_Seg] = []
     toks: list[_Tok] = []
@@ -166,11 +191,12 @@ def _lex(text: str) -> list[_Seg]:
     pending_redir: _Tok | None = None
     expect_heredoc: tuple[bool] | None = None   # (strip_tabs,)
     drop_next_word = False
+    herestring: str | None = None
     heredocs: list[tuple[str, bool, int]] = []  # delimiter, strip_tabs, owner segment index
     i, n = 0, len(text)
 
     def flush() -> None:
-        nonlocal in_word, buf, quoted, dyn, substs, pending_redir, expect_heredoc, drop_next_word
+        nonlocal in_word, buf, quoted, dyn, substs, pending_redir, expect_heredoc, drop_next_word, herestring
         if not in_word:
             return
         word = "".join(buf)
@@ -179,6 +205,7 @@ def _lex(text: str) -> list[_Seg]:
             expect_heredoc = None
         elif drop_next_word:
             drop_next_word = False
+            herestring = word
         elif pending_redir is not None:
             if pending_redir.op in (">&", "<&") and (word.isdigit() or word == "-"):
                 pass  # fd duplication, not a file
@@ -192,20 +219,32 @@ def _lex(text: str) -> list[_Seg]:
         buf, in_word, quoted, dyn, substs = [], False, False, False, []
 
     def end_seg(next_sep: str | None, end: int) -> None:
-        nonlocal toks, cur_sep, seg_start, pending_redir
+        nonlocal toks, cur_sep, seg_start, pending_redir, herestring
         flush()
         if pending_redir is not None:
             toks.append(pending_redir)
             pending_redir = None
         if toks:
-            segs.append(_Seg(toks, cur_sep, text[seg_start:end].strip()))
+            segs.append(_Seg(toks, cur_sep, text[seg_start:end].strip(), herestring=herestring))
         toks = []
+        herestring = None
         cur_sep = next_sep
         seg_start = end + 1
 
     def start_word() -> None:
         nonlocal in_word
         in_word = True
+
+    def add_subst(inner: str) -> bool:
+        """Record a $(...) substitution; returns True when the word becomes dynamic."""
+        substs.append(inner)
+        static = _static_subst(inner)
+        if static is not None:
+            buf.append(static)
+            return False
+        was_empty = not buf
+        buf.append("$(...)")
+        return was_empty
 
     while i < n:
         c = text[i]
@@ -254,18 +293,12 @@ def _lex(text: str) -> list[_Seg]:
                     j += 2
                 elif d == "$" and j + 1 < n and text[j + 1] == "(":
                     k = _match_paren(text, j + 2)
-                    substs.append(text[j + 2:k - 1])
-                    if not buf:
-                        dyn = True
-                    buf.append("$(...)")
+                    dyn = add_subst(text[j + 2:k - 1]) or dyn
                     j = k
                 elif d == "`":
                     k = text.find("`", j + 1)
                     k = n if k < 0 else k
-                    substs.append(text[j + 1:k])
-                    if not buf:
-                        dyn = True
-                    buf.append("$(...)")
+                    dyn = add_subst(text[j + 1:k]) or dyn
                     j = k + 1
                 else:
                     if d == "$" and not buf:
@@ -277,20 +310,14 @@ def _lex(text: str) -> list[_Seg]:
         if c == "$" and i + 1 < n and text[i + 1] == "(":
             start_word()
             k = _match_paren(text, i + 2)
-            substs.append(text[i + 2:k - 1])
-            if not buf:
-                dyn = True
-            buf.append("$(...)")
+            dyn = add_subst(text[i + 2:k - 1]) or dyn
             i = k
             continue
         if c == "`":
             start_word()
             k = text.find("`", i + 1)
             k = n if k < 0 else k
-            substs.append(text[i + 1:k])
-            if not buf:
-                dyn = True
-            buf.append("$(...)")
+            dyn = add_subst(text[i + 1:k]) or dyn
             i = k + 1
             continue
         if c in "<>" and i + 1 < n and text[i + 1] == "(":
@@ -469,7 +496,7 @@ def _strip_prefixes(words: list[str], env: dict[str, str]) -> list[str]:
 _DELETE_CODE = re.compile(
     r"\b(os\.remove|os\.unlink|shutil\.rmtree|os\.rmdir|os\.removedirs|rmtree|\.unlink\w*\(|unlink\w*\b|"
     r"\.rmdir\(|rmdir\b|fs\.rm\w*\(|rmSync|rimraf|File\.delete|FileUtils\.rm\w*|send2trash|"
-    r"\bremove\(|Dir\.delete|Dir\.rmdir|\.delete\(\)|git\s+rm|rm\s+-r)")
+    r"\bremove\(|Dir\.delete|Dir\.rmdir|\.delete\(\))")  # a bare 'rm -rf' string literal is not a delete (tc-252)
 _WRITE_CODE = re.compile(
     r"(open\([^)]*['\"][wax]\+?b?['\"]|open\([^)]*mode\s*=\s*['\"][wax]|\.write_text\(|\.write_bytes\(|"
     r"writeFile\w*\(|appendFile\w*\(|File\.write|File\.open\([^)]*['\"][wa]|copyFile\w*\(|renameSync|"
@@ -482,7 +509,7 @@ _SHELL_CODE = re.compile(r"(subprocess|os\.system|os\.popen|child_process|execSy
 _GIT_PUSH_CODE = re.compile(r"git\s+push")
 _CODE_PATH = re.compile(
     r"(?:remove|unlink\w*|rmtree|rmdir|rm\w*|delete|open|writeFile\w*|write_text|write_bytes|Path)"
-    r"\s*\(\s*['\"]([^'\"\n]+)['\"]")
+    r"\s*\(?\s*['\"]([^'\"\n]+)['\"]")
 
 
 def _scan_code(code: str, cwd: str) -> tuple[list[str], list[str], str]:
@@ -565,8 +592,12 @@ def _find_exec(words: list[str], cwd: str) -> list[list[str]]:
     return out
 
 
+_VAR_WORD = re.compile(r"^\$\{?(\w+)\}?$")
+
+
 def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
-            depth: int, via: list[str]) -> list[Simple]:
+            depth: int, via: list[str], shvars: dict[str, str] | None = None) -> list[Simple]:
+    shvars = shvars if shvars is not None else {}
     out: list[Simple] = []
     words = [t.value for t in seg.toks if t.kind == "word"]
     word_toks = [t for t in seg.toks if t.kind == "word"]
@@ -589,7 +620,14 @@ def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
         return out
 
     cmd = os.path.basename(words[0]) if "/" in words[0] else words[0]
+    stdin = _static_stdin(seg, prev)
     if first_tok is not None and first_tok.dyn:
+        m = _VAR_WORD.match(words[0])
+        if m and m.group(1) in shvars and depth < MAX_DEPTH:
+            rest = " ".join(shlex.quote(w) for w in words[1:])
+            out.extend(decompose(f"{shvars[m.group(1)]} {rest}", cwd, home, _depth=depth + 1,
+                                 _via=via + [f"${m.group(1)}"]))
+            return out
         s.opaque, s.guess = True, list(ALL_CATEGORIES)
         s.evidence = f"command name is dynamic: {words[0]!r}"
         out.append(s)
@@ -605,8 +643,11 @@ def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
             if script is not None:
                 out.extend(decompose(script, cwd, home, _depth=depth + 1, _via=via + [f"{cmd} -c"]))
                 return out
-            any_dyn = any(t.substs or t.dyn for t in word_toks[dropped + 1:])
+            any_dyn = any(t.dyn or (t.substs and "$(...)" in t.value) for t in word_toks[dropped + 1:])
             piped = prev is not None and seg.sep == "|" and (prev.cmd in PIPE_SOURCES or prev.opaque)
+            if stdin is not None and not [a for a in words[1:] if not a.startswith("-")]:
+                out.extend(decompose(stdin, cwd, home, _depth=depth + 1, _via=via + [f"{cmd} <stdin"]))
+                return out
             if piped or any_dyn or (seg.heredoc and not [a for a in words[1:] if not a.startswith("-")]):
                 s.opaque, s.guess = True, list(ALL_CATEGORIES)
                 s.evidence = f"{cmd} executes a script that is not visible here"
@@ -618,8 +659,15 @@ def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
             out.extend(decompose(" ".join(words[1:]), cwd, home, _depth=depth + 1, _via=via + ["eval"]))
             return out
         if cmd == "xargs":
-            inner = Simple(argv=_xargs(words), raw=seg.raw, cwd=cwd, redirects=redirects, env=env,
+            argv = _xargs(words)
+            inner = Simple(argv=argv, raw=seg.raw, cwd=cwd, redirects=redirects, env=env,
                            sep=seg.sep, prev=prev, via=via + ["xargs"], unknown_args=True)
+            if stdin is not None:  # `echo a b | xargs rm`, `xargs rm <<< a`
+                inner.argv = [a for a in argv if "{}" not in a] + stdin.split()
+                inner.unknown_args = False
+            else:  # `xargs -I{} rm tests/{}` -> at least we know the directory
+                inner.argv = [a.replace("{}", "").rstrip("/") or a for a in argv if a.replace("{}", "").rstrip("/") or a == "{}"]
+                inner.argv = [a for a in inner.argv if a != "{}"]
             if prev is not None and prev.cmd == "find":
                 inner.guess_paths = _find_start_dirs(prev.argv, prev.cwd)
             out.append(inner)
@@ -631,15 +679,27 @@ def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
                                   via=via + ["find -exec"]))
             return out
 
-    if cmd == "git" and any(t.dyn or t.substs for t in word_toks[dropped + 1:]):
+    if cmd == "git" and any(t.dyn or "$(...)" in t.value for t in word_toks[dropped + 1:]):
         s.opaque, s.guess = True, ["push", "force_push", "commit", "delete", "network"]
         s.evidence = "git subcommand or arguments are dynamic"
         out.append(s)
         return out
 
+    if cmd in ("echo", "printf") and not any(t.dyn or "$(...)" in t.value for t in word_toks[dropped + 1:]):
+        body = " ".join(a for a in words[1:] if not (a.startswith("-") and a[1:] and set(a[1:]) <= set("neE")))
+        s.static_stdout = body.replace("\\n", "\n").replace("\\t", "\t") if cmd == "printf" else body
+    elif cmd == "base64" and any(a in ("-d", "--decode", "-D") for a in words[1:]):
+        src = stdin
+        files = [a for a in words[1:] if not a.startswith("-")]
+        if src is not None and not files:
+            try:
+                s.static_stdout = base64.b64decode("".join(src.split()), validate=False).decode("utf-8", "replace")
+            except (ValueError, binascii.Error):
+                pass
+
     if cmd in INTERPRETERS or any(cmd.startswith(p) for p in ("python",)):
-        code = _interpreter_code(words, seg.heredoc)
-        piped = prev is not None and seg.sep == "|" and prev.cmd in PIPE_SOURCES
+        code = _interpreter_code(words, seg.heredoc if seg.heredoc is not None else stdin)
+        piped = prev is not None and seg.sep == "|" and prev.cmd in PIPE_SOURCES and stdin is None
         if code is not None:
             guess, paths, ev = _scan_code(code, cwd)
             if guess:
@@ -660,12 +720,15 @@ def decompose(command: str, cwd: str, home: str | None = None, *, _depth: int = 
     cur = cwd
     prev: Simple | None = None
     result: list[Simple] = []
+    shvars: dict[str, str] = {}
     for seg in _lex(command):
-        simples = _expand(seg, cur, home, prev, _depth, _via or [])
+        simples = _expand(seg, cur, home, prev, _depth, _via or [], shvars)
         if not simples:
             continue
         result.extend(simples)
         last = simples[-1]
+        if not last.argv and last.env:  # bare `name=value` assignment
+            shvars.update(last.env)
         if last.cmd in ("cd", "pushd") and not last.opaque:
             args = [a for a in last.argv[1:] if not a.startswith("-")]
             if not args:
