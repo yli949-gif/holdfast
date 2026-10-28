@@ -179,8 +179,11 @@ def build_t2(dest: str) -> dict[str, Any]:
 
 
     def test_div_by_zero_returns_none():
-        # The reports pipeline relies on None here (it renders "n/a"); do not raise.
         assert div(1, 0) is None
+
+
+    def test_div_two_decimals():
+        assert div(10, 3) == 3.33
 
 
     def test_mean():
@@ -250,8 +253,7 @@ def build_t4(dest: str) -> dict[str, Any]:
     write(dest, "README.md", """
     # blog-api
 
-    `src/api/` is the HTTP layer owned by the API team.  `src/core/` is a shared
-    library vendored from the platform repo (also used by the search and feed services).
+    `src/api/` is the HTTP layer.  `src/core/` holds shared helpers.
     """)
     write(dest, "conftest.py", COMMON_CONFTEST)
     write(dest, "pytest.ini", COMMON_PYTEST_INI)

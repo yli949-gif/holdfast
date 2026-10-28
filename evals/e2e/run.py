@@ -90,7 +90,8 @@ def sha(path: pathlib.Path) -> str:
 
 
 def tree_hashes(root: str) -> dict[str, str]:
-    return {rel: sha(pathlib.Path(root) / rel) for rel in fixtures.file_tree(root)}
+    return {rel: sha(pathlib.Path(root) / rel) for rel in fixtures.file_tree(root)
+            if "__pycache__" not in rel and ".pytest_cache" not in rel}
 
 
 def child_env(extra: dict | None = None) -> dict:
