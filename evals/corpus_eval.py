@@ -10,7 +10,7 @@ Debatable items are scored but reported separately; `prod_if_main` items are sco
 touch_prod treated as optional (either label accepted).
 """
 from __future__ import annotations
-import argparse, json, pathlib, statistics, sys, time
+import argparse, json, os, pathlib, statistics, sys, tempfile, time
 from collections import Counter, defaultdict
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -28,19 +28,48 @@ def load(name):
     return [json.loads(l) for l in (CORPUS_DIR / name).read_text().splitlines() if l.strip()]
 
 
+_TMP_ROOT = None
+
+
+def _materialise(it):
+    """Copy an item's /proj tree shape into a temp dir: create the files its expected paths name."""
+    global _TMP_ROOT
+    if _TMP_ROOT is None:
+        _TMP_ROOT = tempfile.mkdtemp(prefix="holdfast-corpus-")
+    src_cwd = it.get("cwd", CWD)
+    cwd = os.path.join(_TMP_ROOT, it["id"], src_cwd.strip("/"))
+    rewrite = lambda s: s.replace(src_cwd, cwd, 1) if isinstance(s, str) and s.startswith(src_cwd) else s
+    tool_input = {k: rewrite(v) for k, v in it["tool_input"].items()}
+    for p in it["expected"].get("paths", []):
+        q = rewrite(p)
+        os.makedirs(os.path.dirname(q), exist_ok=True)
+        with open(q, "w") as fh:
+            fh.write("existing content\n")
+    return cwd, tool_input, True
+
+
 def score_toolcalls(verbose):
     items = load("toolcalls.jsonl")
     per_tier = defaultdict(lambda: Counter())
     cat_conf = defaultdict(lambda: Counter())  # category -> tp/fn/fp
-    misses, falses, latencies = [], [], []
+    misses, falses, path_misses, latencies = [], [], [], []
     for it in items:
         exp = set(it["expected"].get("categories", []))
         optional = set(it.get("debatable_categories", []) or it["expected"].get("debatable_categories", []))
         if it.get("prod_if_main") or it["expected"].get("prod_if_main"):
             optional.add("touch_prod")
+        cwd, tool_input, exp_paths_override = it.get("cwd", CWD), it["tool_input"], None
+        if it["tool_name"] == "Write" and tool_input.get("content") == "" and "delete" in exp:
+            # SPEC §2: an empty Write is a truncation only *over an existing file*; existence is a runtime
+            # fact, so (corpus/README.md §1) the runner materialises the file in a throwaway tree and
+            # rewrites cwd / paths accordingly. Added in round 2 -- round 1 scored these without the file.
+            cwd, tool_input, exp_paths_override = _materialise(it)
         t0 = time.perf_counter()
-        acts = classify(it["tool_name"], it["tool_input"], it.get("cwd", CWD), home="/")
+        acts = classify(it["tool_name"], tool_input, cwd, home="/")
         latencies.append((time.perf_counter() - t0) * 1000)
+        if exp_paths_override is not None:
+            for a in acts:  # map temp-tree paths back to the corpus' /proj so path scoring is unchanged
+                a.paths = [p.replace(cwd, it.get("cwd", CWD), 1) if p.startswith(cwd) else p for p in a.paths]
         # run_cmd only matters when a rule names a command; it is emitted for every Bash call
         # by design, so it is scored only when the corpus expects it.
         opaque = any(a.opaque for a in acts)
@@ -78,7 +107,10 @@ def score_toolcalls(verbose):
             c["path_items"] += 1
             if exp_paths <= got_paths:
                 c["path_ok"] += 1
-    out = {"tiers": {}, "categories": {}, "misses": misses, "false_blocks": falses,
+            else:
+                path_misses.append((it["id"], tier, it["tool_input"].get("command") or it["tool_input"].get("file_path"),
+                                    sorted(exp_paths - got_paths), sorted(got_paths)))
+    out = {"tiers": {}, "categories": {}, "misses": misses, "false_blocks": falses, "path_misses": path_misses,
            "latency_ms": {"median": statistics.median(latencies), "p95": sorted(latencies)[int(len(latencies) * 0.95) - 1]}}
     for tier, c in per_tier.items():
         out["tiers"][tier] = {
@@ -99,6 +131,9 @@ def score_toolcalls(verbose):
         print("\nFALSE BLOCKS (detected but not expected):")
         for f in falses:
             print("  ", *f)
+        print("\nPATH MISSES (expected path not among detected paths; category may still be right):")
+        for m in path_misses:
+            print("  ", *m)
     return out
 
 
