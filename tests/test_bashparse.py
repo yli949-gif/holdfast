@@ -271,3 +271,66 @@ def test_base64_literal_decoded():
 def test_perl_unlink_path_without_parens():
     s = first("perl -e 'unlink \"tests/test_a.py\"'")
     assert "/proj/tests/test_a.py" in s.guess_paths
+
+
+# --- round 2 (heldout) regressions ---------------------------------------------
+
+@pytest.mark.parametrize("cmd", [
+    "/usr/bin/env rm -rf tests", "/usr/bin/sudo rm -rf tests", "busybox rm -rf tests",
+    "toybox rm -rf tests", "coreutils --coreutils-prog=rm -rf tests",
+])
+def test_wrappers_by_path_and_multicall_binaries(cmd):
+    assert argvs(cmd) == [["rm", "-rf", "tests"]], cmd
+
+
+def test_for_loop_binds_variable_for_body():
+    s = [x for x in decompose('for f in tests/*.py; do rm "$f"; done', CWD, HOME) if x.argv]
+    assert [x.argv for x in s] == [["rm", "tests/*.py"]]
+    assert not s[0].opaque
+
+
+def test_for_loop_multiple_values_expand():
+    assert argvs("for d in a b; do rm -rf $d; done") == [["rm", "-rf", "a", "b"]]
+
+
+def test_while_read_loop_keeps_literal_prefix():
+    simples = decompose('ls tests | while read -r f; do rm -rf "tests/$f"; done', CWD, HOME)
+    assert [x.argv for x in simples if x.argv] == [["ls", "tests"], ["read", "-r", "f"], ["rm", "-rf", "tests/$f"]]
+    assert resolve_path("tests/$f", CWD, HOME) == "/proj/tests"
+    assert resolve_path("$f", CWD, HOME) == "/proj/$f"  # no literal prefix: left as-is
+
+
+def test_if_then_keywords_stripped():
+    assert argvs("if [ -d tests ]; then rm -rf tests; fi") == [["[", "-d", "tests", "]"], ["rm", "-rf", "tests"]]
+
+
+def test_ssh_remote_command_decomposed_and_flagged_remote():
+    simples = decompose("ssh -p 22 deploy@web1 'rm -rf /srv/app/releases/old'", CWD, HOME)
+    assert simples[0].argv[0] == "ssh" and not simples[0].remote
+    assert simples[1].argv == ["rm", "-rf", "/srv/app/releases/old"] and simples[1].remote
+    assert simples[1].via == ["ssh deploy@web1"]
+    assert [s.argv[0] for s in decompose("ssh -T git@github.com", CWD, HOME)] == ["ssh"]
+
+
+def test_static_substitutions_pwd_and_which():
+    assert argvs("rm -rf $(pwd)/tests")[-1] == ["rm", "-rf", "$PWD/tests"]
+    assert resolve_path("$PWD/tests", CWD, HOME) == "/proj/tests"
+    assert argvs("$(which rm) -rf tests")[-1] == ["rm", "-rf", "tests"]
+    assert argvs("$(command -v rm) -rf tests")[-1] == ["rm", "-rf", "tests"]
+
+
+def test_brace_expansion_unquoted_only():
+    assert argvs("rm -rf tests/{unit,integration}") == [["rm", "-rf", "tests/unit", "tests/integration"]]
+    assert argvs("rm -rf 'tests/{unit,integration}'") == [["rm", "-rf", "tests/{unit,integration}"]]
+    assert argvs("echo {1..3}") == [["echo", "{1..3}"]]
+
+
+def test_variable_default_expansion():
+    assert resolve_path("${TESTDIR:-tests}", CWD, HOME) == "/proj/tests"
+    assert resolve_path("~/proj/tests", CWD, "/") == "/proj/tests"  # no leading `//`
+
+
+def test_code_paths_via_glob_and_os_path_join():
+    from holdfast.bashparse import _scan_code
+    assert "/proj/tests/*.py" in _scan_code('unlink glob "tests/*.py"', CWD)[1]
+    assert "/proj/tests/fixtures" in _scan_code("shutil.rmtree(os.path.join('tests', 'fixtures'))", CWD)[1]

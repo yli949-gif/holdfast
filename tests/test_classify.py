@@ -163,7 +163,9 @@ def test_mv_source_is_delete_dest_edit_only_inside_project(proj):
 
 
 def test_git_no_network_and_dry_runs(proj):
-    for cmd in ["git fetch", "git pull", "git clone https://x", "git remote -v", "git push"]:
+    # fetch/pull are not SPEC `network` (dev corpus tc-240 labels `git fetch origin` benign); a clone of
+    # a URL is (heldout tc-085) -- see test_git_clone_and_submodule_are_network.
+    for cmd in ["git fetch", "git pull", "git remote -v", "git push"]:
         assert "network" not in cats(bash(cmd, proj)), cmd
     assert cats(bash("git push --dry-run", proj)) == {"run_cmd"}
     assert cats(bash("git commit --dry-run", proj)) == {"run_cmd"}
@@ -341,3 +343,140 @@ def test_more_edit_paths(cmd, rel, proj):
 def test_gio_trash_is_delete(proj):
     assert "delete" in cats(bash("gio trash tests", proj))
     assert "delete" not in cats(bash("gio info tests", proj))
+
+
+# --- round 2 (heldout) regressions --------------------------------------------------------------
+
+@pytest.mark.parametrize("cmd,rel", [
+    ("git worktree remove .worktrees/feature-x", ".worktrees/feature-x"),
+    ("git worktree remove --force ../proj-wt", "../proj-wt"),
+    ("rsync -a --delete src/ backup/src/", "backup/src"),
+    ("cargo clean", "target"),
+])
+def test_more_delete_paths(cmd, rel, proj):
+    acts = by(bash(cmd, proj), "delete")
+    assert os.path.normpath(os.path.join(proj, rel)) in [p for a in acts for p in a.paths], cmd
+
+
+def test_rsync_without_delete_is_write_only(proj):
+    assert cats(bash("rsync -a src/ backup/src/", proj)) == {"run_cmd", "edit_path"}
+
+
+@pytest.mark.parametrize("cmd", [
+    "git reflog expire --expire=now --all", "git gc --prune=now --aggressive", "make clean && make",
+    "gsutil -m rm -r gs://acme-data/tmp/", "curl -X DELETE https://api.example.com/v1/items/42",
+    "curl -XDELETE https://api.example.com/v1/items/42", "http DELETE api.example.com/v1/items/42",
+])
+def test_remote_or_implicit_deletes_without_local_path(cmd, proj):
+    acts = by(bash(cmd, proj), "delete")
+    assert acts and all(a.paths == [] for a in acts), cmd
+
+
+def test_benign_git_gc_and_make_are_not_deletes(proj):
+    for cmd in ["git gc", "git reflog expire --expire=1.week", "make", "make test", "cargo build"]:
+        assert "delete" not in cats(bash(cmd, proj)), cmd
+
+
+def test_ssh_remote_rm_is_delete_and_network_with_no_local_path(proj):
+    acts = bash("ssh deploy@web1 'rm -rf /srv/app/releases/old'", proj)
+    assert {"delete", "network"} <= cats(acts)
+    assert by(acts, "delete")[0].paths == [] and "remote" in by(acts, "delete")[0].evidence
+    assert cats(bash("ssh user@host 'uptime'", proj)) == {"run_cmd", "network"}
+
+
+def test_git_cherry_pick_and_revert_commit(proj):
+    assert {"commit", "edit_path"} <= cats(bash("git cherry-pick -x 3f2a1c9", proj))
+    assert "commit" in cats(bash("git revert HEAD", proj))
+    assert "commit" not in cats(bash("git cherry-pick -n abc", proj))
+
+
+def test_git_clone_and_submodule_are_network(proj):
+    acts = bash("git clone https://github.com/acme/lib vendor/lib", proj)
+    assert "network" in cats(acts) and by(acts, "edit_path")[0].paths == [os.path.join(proj, "vendor/lib")]
+    assert by(bash("git clone git@github.com:a/b.git", proj), "edit_path")[0].paths == [os.path.join(proj, "b")]
+    assert "network" in cats(bash("git submodule update --init --recursive", proj))
+    assert "network" not in cats(bash("git submodule status", proj))
+
+
+def test_git_push_prod_remote_or_ref_is_touch_prod(proj):
+    for cmd in ["git push origin feature:production", "git push prod main",
+                "git push origin HEAD:refs/heads/production", "git push origin production"]:
+        assert {"push", "touch_prod"} <= cats(bash(cmd, proj)), cmd
+    for cmd in ["git push origin main", "git push origin reproduction-fix", "git push"]:
+        assert "touch_prod" not in cats(bash(cmd, proj)), cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "for f in tests/*.py; do rm \"$f\"; done", "ls tests | while read -r f; do rm -rf \"tests/$f\"; done",
+    "/usr/bin/env rm -rf tests", "busybox rm -rf tests", "coreutils --coreutils-prog=rm -rf tests",
+    "rm -rf $(pwd)/tests", "$(which rm) -rf tests", "rm -rf ${TESTDIR:-tests}",
+])
+def test_loop_wrapper_and_substitution_deletes_hit_tests_dir(cmd, proj):
+    acts = by(bash(cmd, proj), "delete")
+    assert acts and not acts[0].opaque, cmd
+    assert all(p.startswith(os.path.join(proj, "tests")) for p in acts[0].paths), (cmd, acts[0].paths)
+
+
+def test_brace_expansion_paths(proj):
+    assert set(by(bash("rm -rf tests/{unit,integration}", proj), "delete")[0].paths) == \
+        {os.path.join(proj, "tests/unit"), os.path.join(proj, "tests/integration")}
+
+
+@pytest.mark.parametrize("cmd,rel", [
+    ("ruby -i -pe 'gsub(/foo/, \"bar\")' tests/test_a.py", "tests/test_a.py"),
+    ("black tests/", "tests"), ("ruff check --fix tests/", "tests"), ("ruff format tests/", "tests"),
+    ("prettier --write tests/a.js", "tests/a.js"), ("gofmt -w tests", "tests"),
+    ("curl -fsSL https://example.com/x.tgz -o tests/x.tgz", "tests/x.tgz"),
+    ("wget -P tests/ https://example.com/lib.tgz", "tests"),
+    ("wget -O tests/lib.tgz https://example.com/lib.tgz", "tests/lib.tgz"),
+    ("scp deploy@web1:/etc/app/app.conf tests/app.conf", "tests/app.conf"),
+])
+def test_formatters_and_downloads_write_paths(cmd, rel, proj):
+    acts = by(bash(cmd, proj), "edit_path")
+    assert os.path.join(proj, rel) in [p for a in acts for p in a.paths], cmd
+
+
+def test_formatter_check_modes_do_not_write(proj):
+    for cmd in ["black --check tests/", "ruff check tests/", "ruff format --check tests/", "prettier tests/a.js",
+                "gofmt -l tests", "scp build.tgz user@host:/srv/", "wget -qO- https://x.sh"]:
+        assert "edit_path" not in cats(bash(cmd, proj)), cmd
+
+
+@pytest.mark.parametrize("cmd", ["bundle add rspec", "composer require monolog/monolog", "pnpm dlx shadcn@latest add button",
+                                 "yarn dlx create-vite@latest app", "python3 -m pip install requests", "twine upload dist/*",
+                                 "npm publish --access public"])
+def test_more_installers_and_uploads_are_network(cmd, proj):
+    assert "network" in cats(bash(cmd, proj)), cmd
+
+
+def test_install_vs_network_only_variants(proj):
+    assert cats(bash("bundle add rspec", proj)) == {"run_cmd", "install", "network"}
+    assert cats(bash("python -m pip install --no-index --find-links=./wheels requests", proj)) == {"run_cmd", "install"}
+    for cmd in ["pip download requests -d /tmp/wheels", "pip list --outdated", "npm view react version",
+                "npm install --dry-run left-pad", "npm publish"]:
+        assert cats(bash(cmd, proj)) == {"run_cmd", "network"}, cmd
+    assert cats(bash("bundle exec rspec", proj)) == {"run_cmd"}
+
+
+def test_prod_markers_in_option_values_urls_and_refs(proj):
+    assert "touch_prod" in cats(bash("terraform apply -var-file=prod.tfvars -auto-approve", proj))
+    assert "touch_prod" in cats(bash("curl -XPOST 'https://deploy.acme.io/api/release?env=production'", proj))
+    assert "touch_prod" in cats(bash("curl https://api.prod.acme.io/health", proj))
+    assert "touch_prod" not in cats(bash("curl https://example.com/production/docs", proj))
+
+
+def test_local_docker_and_gcloud_config_are_not_prod_or_network(proj):
+    assert cats(bash("docker build -t app:prod .", proj)) == {"run_cmd"}
+    assert "touch_prod" in cats(bash("docker compose -f docker-compose.prod.yml up -d", proj))
+    assert cats(bash("gcloud config set project acme-prod", proj)) == {"run_cmd", "touch_prod"}
+    assert "network" in cats(bash("gcloud run deploy api --project=acme-prod", proj))
+
+
+@pytest.mark.parametrize("path,prod", [
+    ("/proj/.env.production", True), ("/proj/docker-compose.prod.yml", True), ("/proj/config/Production.yaml", True),
+    ("/proj/config/app-prod.yaml", True), ("/proj/deploy/k8s/overlays/production/d.yaml", True),
+    ("/proj/src/production_utils.py", False), ("/proj/docs/reproduction-steps.md", False), ("/proj/src/product.py", False),
+])
+def test_editor_prod_path_tokens(path, prod):
+    acts = classify("Edit", {"file_path": path, "old_string": "a", "new_string": "b"}, "/proj", home=HOME)
+    assert ("touch_prod" in cats(acts)) is prod, path

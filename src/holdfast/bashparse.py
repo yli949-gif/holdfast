@@ -48,6 +48,14 @@ XARGS_ARG_OPTS = {"-I", "-n", "-P", "-d", "-L", "-s", "-E", "-a", "--max-args", 
                   "--delimiter", "--replace", "--arg-file"}
 DEVNULL = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"}
 MAX_DEPTH = 6
+# Multi-call binaries whose first argument is the real command (`busybox rm`, `toybox rm`).
+MULTICALL = {"busybox", "toybox"}
+# Shell keywords that may precede a command inside a compound statement (`do rm x`, `then rm x`).
+LEADING_KEYWORDS = {"do", "then", "else", "elif", "if", "while", "until", "{", "!"}
+# Segments that are only a closing keyword (`done`, `fi`) run nothing.
+CLOSING_KEYWORDS = {"done", "fi", "esac", "}", "do", "then", "else"}
+SSH_ARG_OPTS = {"-p", "-i", "-l", "-o", "-J", "-F", "-L", "-R", "-D", "-W", "-b", "-c", "-e", "-m",
+                "-O", "-Q", "-S", "-w", "-E", "-B", "-I"}
 
 
 @dataclass
@@ -74,6 +82,7 @@ class Simple:
     unknown_args: bool = False
     via: list[str] = field(default_factory=list)
     static_stdout: str | None = None   # output of echo/printf/base64 -d when statically known
+    remote: bool = False               # runs on another host (`ssh host 'cmd'`): paths are not local
 
     @property
     def cmd(self) -> str:
@@ -99,6 +108,9 @@ class Simple:
 
 # --------------------------------------------------------------------------- paths
 
+_VAR_DEFAULT = re.compile(r"\$\{\w+:?[-=]([^}]*)\}")
+
+
 def resolve_path(word: str, cwd: str, home: str | None) -> str:
     """Resolve a shell word to an absolute, normalised path."""
     home = home or os.path.expanduser("~")
@@ -107,9 +119,18 @@ def resolve_path(word: str, cwd: str, home: str | None) -> str:
         w = home + w[1:]
     w = w.replace("${HOME}", home).replace("$HOME", home)
     w = w.replace("${PWD}", cwd).replace("$PWD", cwd)
+    w = _VAR_DEFAULT.sub(lambda m: m.group(1), w)   # ${X:-tests} -> tests (X unknown to us)
+    # `tests/$f`: the variable is unknown, but the literal prefix bounds what can be touched
+    # (heldout tc-148). A word that *starts* with the variable is left literal.
+    if "$" in w and not w.startswith("$"):
+        head = w[:w.index("$")]
+        if "/" in head:
+            w = head.rstrip("/") or "/"
     if not w.startswith("/"):
         w = os.path.join(cwd, w)
     out = os.path.normpath(w)
+    if out.startswith("//"):  # POSIX lets normpath keep a leading `//` (home="/" + "/proj")
+        out = "/" + out.lstrip("/")
     return out
 
 
@@ -162,8 +183,16 @@ def _match_paren(text: str, i: int) -> int:
 _STATIC_ECHO = re.compile(r"^\s*(?:echo|printf)\s+(?:-[neE]+\s+)?([^$`|;&<>()]+)$")
 
 
+_STATIC_WHICH = re.compile(r"^\s*(?:which|command\s+-v|type\s+-[pP])\s+([\w./-]+)\s*$")
+
+
 def _static_subst(inner: str) -> str | None:
-    """`$(echo rm)` is statically `rm`; anything less trivial stays dynamic."""
+    """`$(echo rm)` is statically `rm`, `$(which rm)` is `rm`, `$(pwd)` is `$PWD`; anything less trivial stays dynamic."""
+    if inner.strip() == "pwd":
+        return "$PWD"
+    m = _STATIC_WHICH.match(inner)
+    if m:
+        return m.group(1)
     m = _STATIC_ECHO.match(inner)
     if not m:
         return None
@@ -446,7 +475,23 @@ def _strip_prefixes(words: list[str], env: dict[str, str]) -> list[str]:
             words.pop(0)
             changed = True
             continue
-        if w in ("sudo", "doas"):
+        if "/" in w:  # `/usr/bin/env rm`, `/usr/bin/sudo rm`: wrappers by absolute path (heldout tc-110)
+            base = os.path.basename(w)
+            if base in ("sudo", "doas", "env") or base in PREFIX_SIMPLE or base in PREFIX_WITH_ARG \
+                    or base in MULTICALL or base == "coreutils":
+                w = words[0] = base
+        if w in LEADING_KEYWORDS:  # `do rm x`, `then rm x`, `while read f`, `! test -e x`
+            words.pop(0)
+            changed = True
+        elif w in MULTICALL:  # `busybox rm -rf x`: the applet is the real command (heldout tc-112)
+            words.pop(0)
+            changed = True
+        elif w == "coreutils":  # `coreutils --coreutils-prog=rm -rf x` (heldout tc-113)
+            words.pop(0)
+            if words and words[0].startswith("--coreutils-prog="):
+                words[0] = words[0].split("=", 1)[1]
+            changed = True
+        elif w in ("sudo", "doas"):
             words.pop(0)
             while words and words[0].startswith("-"):
                 opt = words.pop(0)
@@ -509,7 +554,8 @@ _SHELL_CODE = re.compile(r"(subprocess|os\.system|os\.popen|child_process|execSy
 _GIT_PUSH_CODE = re.compile(r"git\s+push")
 _CODE_PATH = re.compile(
     r"(?:remove|unlink\w*|rmtree|rmdir|rm\w*|delete|open|writeFile\w*|write_text|write_bytes|Path)"
-    r"\s*\(?\s*['\"]([^'\"\n]+)['\"]")
+    r"\s*\(?\s*(?:glob\s*\(?\s*)?(?:os\.path\.join\(\s*)?['\"]([^'\"\n]+)['\"]")
+_CODE_JOIN = re.compile(r"os\.path\.join\(\s*['\"]([^'\"\n]+)['\"]\s*,\s*['\"]([^'\"\n]+)['\"]\s*\)")
 
 
 def _scan_code(code: str, cwd: str) -> tuple[list[str], list[str], str]:
@@ -529,7 +575,8 @@ def _scan_code(code: str, cwd: str) -> tuple[list[str], list[str], str]:
             if cat not in guess:
                 guess.append(cat)
         ev.append(f"spawns a shell: {m.group(0).strip()!r}")
-    paths = [resolve_path(p, cwd, None) for p in _CODE_PATH.findall(code) if p and "/" in p or p]
+    code = _CODE_JOIN.sub(lambda m: f"'{m.group(1)}/{m.group(2)}'", code)  # os.path.join('a','b') -> 'a/b'
+    paths = [resolve_path(p, cwd, None) for p in _CODE_PATH.findall(code) if p]
     return guess, paths, "; ".join(ev)
 
 
@@ -593,6 +640,24 @@ def _find_exec(words: list[str], cwd: str) -> list[list[str]]:
 
 
 _VAR_WORD = re.compile(r"^\$\{?(\w+)\}?$")
+_BRACE = re.compile(r"\{([^{}]*,[^{}]*)\}")
+
+
+def _brace_expand(word: str, limit: int = 64) -> list[str]:
+    """`tests/{unit,integration}` -> both words; nested braces and sequences (`{1..9}`) stay literal."""
+    out = [word]
+    for _ in range(4):  # a few comma groups at most
+        nxt: list[str] = []
+        for w in out:
+            m = _BRACE.search(w)
+            if m is None or "$" in m.group(1):
+                nxt.append(w)
+            else:
+                nxt.extend(w[:m.start()] + alt + w[m.end():] for alt in m.group(1).split(","))
+        if nxt == out or len(nxt) > limit:
+            return out
+        out = nxt
+    return out
 
 
 def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
@@ -612,6 +677,29 @@ def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
     words = _strip_prefixes(list(words), env)
     dropped = n_before - len(words)
     first_tok = word_toks[dropped] if dropped < len(word_toks) else None
+    if words and words[0] == "for":  # `for f in a b c` binds f for the loop body (heldout tc-147)
+        if len(words) >= 3 and words[2] == "in":
+            shvars[words[1]] = " ".join(words[3:])
+        return out
+    if len(words) == 1 and words[0] in CLOSING_KEYWORDS:  # `done`, `fi`: no command runs
+        return out
+    # `rm $f` with f bound by `for`/`x=...`: substitute the known value(s) into the arguments;
+    # `rm -rf tests/{unit,integration}`: expand one level of unquoted braces (heldout tc-123)
+    bound_toks: set[int] = set()
+    if len(words) > 1:
+        new_words: list[str] = [words[0]]
+        for i, w in enumerate(words[1:], 1):
+            m = _VAR_WORD.match(w)
+            tok = word_toks[dropped + i] if dropped + i < len(word_toks) else None
+            if m and m.group(1) in shvars:
+                new_words.extend(shvars[m.group(1)].split() or [w])
+                bound_toks.add(dropped + i)
+            elif "{" in w and tok is not None and not tok.quoted:
+                new_words.extend(_brace_expand(w))
+            else:
+                new_words.append(w)
+        words = new_words
+    arg_toks = [t for i, t in enumerate(word_toks) if i > dropped and i not in bound_toks]
 
     s = Simple(argv=words, raw=seg.raw, cwd=cwd, redirects=redirects, env=env, sep=seg.sep,
                prev=prev, heredoc=seg.heredoc, via=list(via))
@@ -634,6 +722,24 @@ def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
         return out
 
     if depth < MAX_DEPTH:
+        if cmd == "ssh":
+            # `ssh host 'rm -rf x'`: the remote shell re-parses the joined arguments (heldout tc-077).
+            # The ssh command itself stays (network / prod host); remote commands carry no local paths.
+            i, host = 1, None
+            while i < len(words):
+                if words[i] in SSH_ARG_OPTS and i + 1 < len(words):
+                    i += 2
+                elif words[i].startswith("-"):
+                    i += 1
+                else:
+                    host, i = words[i], i + 1
+                    break
+            out.append(s)
+            if host is not None and i < len(words):
+                for r in decompose(" ".join(words[i:]), cwd, home, _depth=depth + 1, _via=via + [f"ssh {host}"]):
+                    r.remote = True
+                    out.append(r)
+            return out
         if cmd in SHELLS:
             script = None
             for i, a in enumerate(words[1:], 1):
@@ -643,7 +749,7 @@ def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
             if script is not None:
                 out.extend(decompose(script, cwd, home, _depth=depth + 1, _via=via + [f"{cmd} -c"]))
                 return out
-            any_dyn = any(t.dyn or (t.substs and "$(...)" in t.value) for t in word_toks[dropped + 1:])
+            any_dyn = any(t.dyn or (t.substs and "$(...)" in t.value) for t in arg_toks)
             piped = prev is not None and seg.sep == "|" and (prev.cmd in PIPE_SOURCES or prev.opaque)
             if stdin is not None and not [a for a in words[1:] if not a.startswith("-")]:
                 out.extend(decompose(stdin, cwd, home, _depth=depth + 1, _via=via + [f"{cmd} <stdin"]))
@@ -679,13 +785,13 @@ def _expand(seg: _Seg, cwd: str, home: str | None, prev: Simple | None,
                                   via=via + ["find -exec"]))
             return out
 
-    if cmd == "git" and any(t.dyn or "$(...)" in t.value for t in word_toks[dropped + 1:]):
+    if cmd == "git" and any(t.dyn or "$(...)" in t.value for t in arg_toks):
         s.opaque, s.guess = True, ["push", "force_push", "commit", "delete", "network"]
         s.evidence = "git subcommand or arguments are dynamic"
         out.append(s)
         return out
 
-    if cmd in ("echo", "printf") and not any(t.dyn or "$(...)" in t.value for t in word_toks[dropped + 1:]):
+    if cmd in ("echo", "printf") and not any(t.dyn or "$(...)" in t.value for t in arg_toks):
         body = " ".join(a for a in words[1:] if not (a.startswith("-") and a[1:] and set(a[1:]) <= set("neE")))
         s.static_stdout = body.replace("\\n", "\n").replace("\\t", "\t") if cmd == "printf" else body
     elif cmd == "base64" and any(a in ("-d", "--decode", "-D") for a in words[1:]):
