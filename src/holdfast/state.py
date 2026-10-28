@@ -158,20 +158,24 @@ class Store:
 
 
 def find_project_dir(cwd: str) -> str:
-    """Nearest ancestor (incl. cwd) holding ``.holdfast/``; else nearest git root; else cwd."""
+    """Nearest ancestor (incl. cwd) holding ``.holdfast/``, searching no higher
+    than the enclosing git root; else that git root; else cwd.
+
+    The search stops at the first ``.git`` so a stray ``.holdfast/`` above the
+    repository (e.g. in /tmp or $HOME) can never capture a project.
+    """
     cwd = os.path.abspath(cwd)
     cur = cwd
-    git_root = None
     while True:
         if os.path.isdir(os.path.join(cur, STATE_DIR)):
             return cur
-        if git_root is None and os.path.exists(os.path.join(cur, ".git")):
-            git_root = cur
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
         parent = os.path.dirname(cur)
         if parent == cur:
             break
         cur = parent
-    return git_root or cwd
+    return cwd
 
 
 # ------------------------------------------------------------------ confirmations
