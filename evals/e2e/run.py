@@ -62,7 +62,11 @@ SCRUB_ENV = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_AUTO
              "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "CLAUDE_CODE_TEE_SDK_STDOUT", "CLAUDE_CODE_DEBUG",
              "CLAUDE_AFTER_LAST_COMPACT", "CLAUDE_EFFORT", "CLAUDE_PROJECT_UUID", "CLAUDE_PROJECT_TOOL",
              "CLAUDE_CODE_SYNC_SKILLS", "CLAUDE_CODE_SYNC_PLUGINS", "CLAUDE_ADDITIONAL_DIRECTORIES",
-             "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD", "CLAUDE_CODE_ENTRYPOINT"]
+             "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD", "CLAUDE_CODE_ENTRYPOINT",
+             "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN"]
+# NOTE: `--dangerously-skip-permissions` is deliberately NOT used: in print mode (2.1.312) it appends stray
+# text ("/opt/node22/bin/node", a bash-snapshot error line) to the prompt.  `--permission-mode
+# bypassPermissions` has the same effect on permissions without that contamination.
 
 SUB_SUFFIX = ("\n\nDelegate the hands-on work (the actual commands and file changes) to a subagent using the "
               "Agent tool with the general-purpose agent, then check its result yourself.")
@@ -210,7 +214,7 @@ class Run:
     def claude(self, idx: int, label: str, prompt: str, resume: bool) -> dict:
         steps = self.out / "steps"
         steps.mkdir(parents=True, exist_ok=True)
-        cmd = ["claude", "-p", prompt, "--model", MODEL, "--max-turns", str(MAX_TURNS), "--dangerously-skip-permissions",
+        cmd = ["claude", "-p", prompt, "--model", MODEL, "--max-turns", str(MAX_TURNS), "--permission-mode", "bypassPermissions",
                "--output-format", "stream-json", "--verbose", "--settings", self.settings_path]
         cmd += ["--resume", self.session_id] if resume else ["--session-id", self.session_id]
         if label == "compact":
@@ -220,9 +224,11 @@ class Run:
         attempts, result, stderr, rc = 0, None, "", None
         while attempts < 3:
             attempts += 1
-            with open(stream_path, "w") as fh, open("/dev/null") as devnull:
+            # stdin MUST be an empty pipe (input=""), not /dev/null: with /dev/null, concurrent `claude -p`
+            # processes (2.1.312) read garbage (other processes' output, NUL bytes) and append it to the prompt.
+            with open(stream_path, "w") as fh:
                 try:
-                    p = subprocess.run(cmd, cwd=self.proj, env=child_env(self.env_extra), stdin=devnull, stdout=fh,
+                    p = subprocess.run(cmd, cwd=self.proj, env=child_env(self.env_extra), input="", stdout=fh,
                                        stderr=subprocess.PIPE, text=True, timeout=STEP_TIMEOUT)
                     rc, stderr = p.returncode, p.stderr
                 except subprocess.TimeoutExpired as exc:
@@ -235,9 +241,11 @@ class Run:
                     continue
                 if d.get("type") == "result":
                     result = d
-            text = (stderr or "") + json.dumps(result or {})
-            rate_limited = ("rate limit" in text.lower() or "429" in (stderr or "") or
-                            (result or {}).get("api_error_status") == 429)
+            # only an *errored* step can be a rate limit (the result text itself may mention "rate limiter")
+            errored = result is None or bool((result or {}).get("is_error"))
+            text = (stderr or "") + ((result or {}).get("result") or "")
+            rate_limited = errored and ("rate limit" in text.lower() or "429" in text or
+                                        (result or {}).get("api_error_status") == 429)
             if rate_limited and attempts < 3:
                 self.log(f"rate limited on step {idx}; backing off 90s (attempt {attempts})")
                 time.sleep(90)
