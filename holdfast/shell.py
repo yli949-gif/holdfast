@@ -1921,8 +1921,11 @@ def _package_script(mgr: str, script: str, extra: list[str], ctx: Ctx, detail: s
         e.detail = f"{detail} -> {e.detail}"
     if test:
         return [Effect("test", detail, kind="command", detail=detail)] + [e for e in body_effs if e.action not in ("run", "read", "test", "exec_opaque")]
-    precise = [e for e in body_effs if e.action not in ("run", "read")]
-    return precise + [_opaque(UNKNOWN, f"{detail}" + ("" if found else " (script body not visible)"))]
+    if not found:
+        return [_opaque(UNKNOWN, f"{detail} (script body not visible)")]
+    # the body is literal shell, as visible as `bash -c '...'`: report what it does (anything it runs
+    # that is itself opaque, e.g. `node build.js`, is already an exec_opaque in body_effs)
+    return body_effs or [Effect("run", detail, kind="command", detail=detail)]
 
 
 def _h_node_pm(cmd, args, ctx, stdin, detail):
@@ -2107,23 +2110,28 @@ def _h_make(cmd, args, ctx, stdin, detail):
             targets.append(a)
         i += 1
     if targets[:1] == ["test"] or targets[:1] == ["check"]:
-        body = _make_recipe_effects(mctx, mfile, targets[:1], detail)
+        body = _make_recipe_effects(mctx, mfile, targets[:1], detail) or []
         return [Effect("test", detail, kind="command", detail=detail)] + [e for e in body if e.action not in ("run", "read", "test", "exec_opaque")]
     body = _make_recipe_effects(mctx, mfile, targets, detail)
-    precise = [e for e in body if e.action not in ("run", "read")]
-    return precise + [_opaque(UNKNOWN, detail + ("" if body else " (recipe not visible)"))]
+    if body is None:
+        return [_opaque(UNKNOWN, detail + " (recipe not visible)")]
+    return body or [Effect("run", detail, kind="command", detail=detail)]
 
 
-def _make_recipe_effects(ctx: Ctx, mfile: str | None, targets: list[str], detail: str) -> list[Effect]:
+def _make_recipe_effects(ctx: Ctx, mfile: str | None, targets: list[str], detail: str) -> list[Effect] | None:
+    """Effects of the recipes make would run (targets + prerequisites). None if the recipe is not visible
+    (no Makefile, unknown target, pattern/implicit rules, include directives)."""
     text = None
     for name in ([mfile] if mfile else ["GNUmakefile", "makefile", "Makefile"]):
         text = ctx.read_file(name)
         if text is not None:
             break
     if text is None or ctx.depth > MAX_DEPTH:
-        return []
+        return None
     rules, default = _make_rules(text)
     todo = list(targets or ([default] if default else []))
+    if not todo or any(t not in rules for t in todo) or re.search(r"^\s*-?include\s", text, re.M):
+        return None
     seen: set = set()
     effs: list[Effect] = []
     sub = ctx.child(depth=ctx.depth + 1)
@@ -2133,6 +2141,8 @@ def _make_recipe_effects(ctx: Ctx, mfile: str | None, targets: list[str], detail
             continue
         seen.add(t)
         prereqs, recipe = rules[t]
+        if any(p not in rules for p in prereqs) and any("%" in r for r in rules):
+            return None                     # a pattern rule may build that prerequisite: recipe not visible
         todo = [p for p in prereqs if p in rules] + todo
         for line in recipe:
             line = line.lstrip("@-+ \t").replace("$(MAKE)", "make").replace("${MAKE}", "make").replace("$$", "\x00")

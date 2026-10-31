@@ -996,17 +996,27 @@ class TestFilesystemAware:
         (tmp_path / "Makefile").write_text("all: build\n\nclean:\n\trm -rf build dist\n\t@echo done\n\nship:\n\tgit push origin main\n\ntest:\n\t@echo ok\n")
         ps = pairs("make clean", cwd=r, root=r)
         assert ("delete", "build") in ps and ("delete", "dist") in ps
-        assert any(e.action == "exec_opaque" and "make clean" in e.detail and not e.certain for e in fx("make clean", cwd=r, root=r))
+        # a visible recipe is literal shell: precise effects, no blanket exec_opaque
+        assert "exec_opaque" not in acts("make clean", cwd=r, root=r)
+        assert acts("make all", cwd=r, root=r) == ["run"]          # prerequisite `build` has no rule: it is a file
+        e, = fx("make nosuch", cwd=r, root=r)
+        assert e.action == "exec_opaque" and not e.certain and "make nosuch" in e.detail
         assert ("push", "origin/main") in pairs("make ship", cwd=r, root=r)
         assert acts("make test", cwd=r, root=r) == ["test"]
+        (tmp_path / "Makefile").write_text("all: x.o\n\n%.o: %.c\n\tcc -c $<\n")
+        assert acts("make all", cwd=r, root=r) == ["exec_opaque"]  # a pattern rule builds it: not visible
 
     def test_npm_script(self, tmp_path):
         import json
         r = self._proj(tmp_path)
         (tmp_path / "package.json").write_text(json.dumps({"scripts": {"clean": "rm -rf build dist", "test": "echo ok"}}))
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {"clean": "rm -rf build dist", "test": "echo ok",
+                                                                         "build": "tsc && node scripts/bundle.js"}}))
         ps = pairs("npm run clean", cwd=r, root=r)
-        assert ("delete", "build") in ps and ("delete", "dist") in ps
-        assert any(a == "exec_opaque" for a, _ in ps)
+        assert ps == [("delete", "build"), ("delete", "dist")]
+        assert ("exec_opaque", "scripts/bundle.js") in pairs("npm run build", cwd=r, root=r)
+        e, = fx("npm run nosuch", cwd=r, root=r)
+        assert e.action == "exec_opaque" and not e.certain
         assert acts("npm run test", cwd=r, root=r) == ["test"]
 
     def test_npm_script_without_package_json_is_opaque(self):
