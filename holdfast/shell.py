@@ -2554,18 +2554,15 @@ class _PyScan:
     # -- passes
     def collect(self) -> None:
         for node in ast.walk(self.tree):
+            # Importing (project) modules and calling their functions is a plain run: only concrete
+            # filesystem / subprocess / network / dynamic-exec calls in this code produce effects.
+            # (A dotted module name is not a path; reporting it as an opaque target false-blocked real runs.)
             if isinstance(node, ast.Import):
                 for a in node.names:
                     self.aliases[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
-                    if _local_module(a.name, self.ctx, (self.script_dir,) if self.script_dir else ()):
-                        self.add("exec_opaque", a.name, kind="opaque", note=f"imports project module {a.name}")
             elif isinstance(node, ast.ImportFrom) and node.module:
                 for a in node.names:
                     self.aliases[a.asname or a.name] = f"{node.module}.{a.name}"
-                if node.level == 0 and _local_module(node.module, self.ctx, (self.script_dir,) if self.script_dir else ()):
-                    self.add("exec_opaque", node.module, kind="opaque", note=f"imports project module {node.module}")
-                elif node.level > 0:
-                    self.add("exec_opaque", node.module, kind="opaque", note="relative import")
         for _ in range(2):   # two passes so that chained constants resolve
             for node in ast.walk(self.tree):
                 if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
@@ -2840,8 +2837,13 @@ _VALUE_FLAGS = {"python": {"-m", "-W", "-X", "-Q"}, "node": {"-r", "--require", 
                 "perl": {"-M", "-m", "-I", "-x"}, "ruby": {"-r", "-I", "-C", "-E", "-F"}, "php": {"-c", "-d", "-z", "-t"}}
 
 
+_PROBE_FLAGS = {"--version", "-V", "-VV", "--help", "-h", "-?", "--help-all", "--help-env", "--help-xoptions"}
+
+
 def _interpreter(cmd, args, ctx, stdin, detail):
     lang = "python" if cmd.startswith(("python", "pypy")) else _LANG_OF.get(cmd, cmd)
+    if args and all(a in _PROBE_FLAGS or (a == "-v" and lang != "python") for a in args):
+        return [Effect("run", detail, kind="command", detail=detail)]       # version / help probe
     if lang == "perl" and any((a.startswith("-p") or a.startswith("-n")) and "i" in a or a.startswith("-i") for a in args):
         files = [p for p in _paths_after_opts(args) if not re.match(r"^[sy]/|^tr/", p)]
         inline = [args[k + 1] for k, a in enumerate(args) if a in ("-e", "-pe", "-pie", "-E") and k + 1 < len(args)]

@@ -1,7 +1,7 @@
 {
  "corpus": {
   "code_version": {
-   "sha1": "2660aed07177",
+   "sha1": "331bfe5801a1",
    "files": {
     "__init__.py": "101B",
     "cli.py": "6541B",
@@ -9,7 +9,7 @@
     "hook.py": "7378B",
     "monitor.py": "18692B",
     "rules.py": "58196B",
-    "shell.py": "142622B",
+    "shell.py": "142643B",
     "state.py": "5574B"
    }
   },

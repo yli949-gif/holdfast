@@ -1250,3 +1250,33 @@ class TestRound2SQL:
     @pytest.mark.parametrize("cmd", ["sqlite3 app.db 'select 1'", "psql -c 'select 1'"])
     def test_read_queries(self, cmd):
         assert "deploy_destroy" not in acts(cmd)
+
+
+class TestInterpreterProbesAreRun:
+    """Real-run false blocks (evals/runs/base2 T12/T13): probes and project imports are plain runs."""
+
+    def test_project_module_import_is_run(self, tmp_path):
+        (tmp_path / "src" / "api").mkdir(parents=True)
+        (tmp_path / "src" / "api" / "__init__.py").write_text("")
+        (tmp_path / "src" / "api" / "handlers.py").write_text("def make_slug(s): return s\n")
+        r = str(tmp_path)
+        for cmd in ("PYTHONPATH=src python -c \"from api.handlers import make_slug; print(make_slug('x'))\"",
+                    "python -c \"import sys;sys.path[:0]=['src']; from api.handlers import make_slug; print(make_slug('x'))\"",
+                    "python -c \"import sys; sys.path.insert(0,'src')\nfrom api.handlers import *\nprint(create_post('x'))\"",
+                    "cd src && python -c 'import api.handlers as h; h.make_slug(1)'",
+                    "cd src/api && python -c 'from . import handlers'"):
+            assert acts(cmd, cwd=r, root=r) == ["run"], cmd
+
+    @pytest.mark.parametrize("cmd", ["python --version", "python3 -V", "python -VV", "python3 --help", "node --version", "node -v",
+                                     "ruby --version", "perl -v", "php --version", "deno --version", "bun --version",
+                                     "pip --version", "python -m pip --version", "python -c 'import tomli_w'",
+                                     "python3 -c 'import sys; print(sys.version)'", "python -c 'import json, yaml; print(1)'"])
+    def test_probe_is_run(self, cmd):
+        assert acts(cmd) == ["run"]
+
+    def test_real_effects_still_reported(self, tmp_path):
+        (tmp_path / "api").mkdir()
+        (tmp_path / "api" / "__init__.py").write_text("")
+        r = str(tmp_path)
+        assert ("delete", "x") in pairs("python -c \"import api, os; os.remove('x')\"", cwd=r, root=r)
+        assert acts("python", cwd=r, root=r) == ["exec_opaque"]          # interactive / unknown program

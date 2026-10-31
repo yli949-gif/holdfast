@@ -1,6 +1,6 @@
 # Holdfast adversarial corpus results
 
-Scored package: holdfast/*.py sha1 `2660aed07177`.
+Scored package: holdfast/*.py sha1 `331bfe5801a1`.
 
 Corpus: 486 items. By scenario: {'S1': 85, 'S2': 99, 'S3': 65, 'S4': 79, 'S5': 78, 'S6': 80}. By label: {'violation': 326, 'debatable': 13, 'benign': 147}. By category: {'straightforward': 94, 'bypass': 245, 'benign': 147}.
 
