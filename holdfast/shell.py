@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 import base64
 import binascii
+import fnmatch
 import json
 import os
 import posixpath
@@ -40,7 +41,7 @@ from .effects import Effect, EVERYTHING, UNKNOWN, normalize_path, resolve_on_dis
 MAX_DEPTH = 3
 MAX_SCRIPT_BYTES = 256 * 1024
 
-WRAPPERS = {"sudo", "doas", "nohup", "time", "env", "command", "builtin", "exec",
+WRAPPERS = {"sudo", "doas", "nohup", "time", "env", "command", "builtin", "exec", "busybox",
             "nice", "ionice", "timeout", "stdbuf", "chronic", "caffeinate", "setsid", "unbuffer", "flock", "taskset", "chrt"}
 # wrappers whose following positional argument(s) are values to skip (timeout 5, flock lockfile, taskset mask)
 WRAPPER_SKIP_ARGS = {"timeout": 1, "flock": 1, "taskset": 1, "chrt": 1}
@@ -50,7 +51,7 @@ WRAPPER_VALUE_FLAGS = {
     "doas": {"-u", "-C"},
     "nice": {"-n"},
     "ionice": {"-c", "-n", "-p"},
-    "env": {"-u", "-C", "-S"},
+    "env": {"-u", "-C"},
     "timeout": {"-s", "-k"},
     "flock": {"-w", "-E"},
 }
@@ -423,6 +424,9 @@ class Ctx:
     funcs: dict = field(default_factory=dict)         # name -> (Lexed, tokens)
     git_aliases: dict = field(default_factory=dict)   # name -> expansion string
     seen: frozenset = frozenset()                     # script files being classified (recursion guard)
+    # absolute paths (or globs; "*" = unknown) written earlier in this command. Shared by every child
+    # context: a program file written by an earlier segment must not be read from disk (stale content).
+    written: set = field(default_factory=set)
 
     def child(self, **kw) -> "Ctx":
         """A new process / subshell: copies of env and functions."""
@@ -432,6 +436,8 @@ class Ctx:
         return c
 
     def N(self, p: str) -> str:
+        if p == UNKNOWN:
+            return UNKNOWN
         if not self.cwd_known and not (p.startswith("/") or p.startswith("~")):
             return UNKNOWN
         return normalize_path(p, self.cwd, self.root)
@@ -443,11 +449,37 @@ class Ctx:
         p = os.path.expanduser(p)
         return posixpath.normpath(p if posixpath.isabs(p) else posixpath.join(self.cwd, p))
 
+    def note_written(self, effs: list[Effect]) -> None:
+        base = self.root or self.cwd
+        for e in effs:
+            if e.action not in ("write", "edit", "delete", "move", "discard") or e.kind not in ("path", "opaque"):
+                continue
+            if e.target in (UNKNOWN, EVERYTHING) or "$" in e.target:
+                self.written.add("*")
+            else:
+                self.written.add(posixpath.normpath(e.target if posixpath.isabs(e.target) else posixpath.join(base, e.target)))
+
+    def stale(self, ap: str) -> bool:
+        """Was `ap` (absolute) possibly written earlier in this command?"""
+        if not self.written:
+            return False
+        if "*" in self.written:
+            return True
+        for w in self.written:
+            if ap == w or ap.startswith(w.rstrip("/") + "/"):
+                return True
+            if any(c in w for c in "*?[") and fnmatch.fnmatchcase(ap, w):
+                return True
+        return False
+
     def read_file(self, p: str) -> str | None:
-        """Read a project file (inside root, or cwd when there is no root). None if not allowed / missing."""
+        """Read a project file (inside root, or cwd when there is no root). None if not allowed / missing,
+        or if it may have been rewritten earlier in this same command (the on-disk content is stale)."""
         if not self.fs:
             return None
         ap = self.abs(p)
+        if ap and self.stale(ap):
+            return None
         base = self.root or self.cwd
         if not ap or not base or not os.path.isdir(base):
             return None
@@ -755,7 +787,14 @@ def _static_sub_value(inner: str) -> str | None:
 
 
 def _exec_simple(lexed: Lexed, toks: list, ctx: Ctx, stdin: Stdin) -> tuple[list[Effect], Stdin]:
-    """Expand and classify one simple command. Returns (effects, what it writes to stdout)."""
+    """Expand and classify one simple command. Returns (effects, what it writes to stdout).
+    Files it writes are remembered so later segments do not trust their on-disk content."""
+    effects, out = _exec_simple_inner(lexed, toks, ctx, stdin)
+    ctx.note_written(effects)
+    return effects, out
+
+
+def _exec_simple_inner(lexed: Lexed, toks: list, ctx: Ctx, stdin: Stdin) -> tuple[list[Effect], Stdin]:
     effects: list[Effect] = []
     # 1. command substitutions run first
     subvals: dict = {}
@@ -881,6 +920,18 @@ def _strip_wrappers(words: list[str]) -> tuple[list[str], list[str]]:
             while i < len(words) and words[i].startswith("-") and words[i] != "-":
                 flag = words[i]
                 i += 1
+                split = None
+                if b == "env" and flag in ("-S", "--split-string") and i < len(words):
+                    split, i = words[i], i + 1
+                elif b == "env" and (flag.startswith("--split-string=") or (flag.startswith("-S") and len(flag) > 2)):
+                    split = flag.split("=", 1)[1] if flag.startswith("--") else flag[2:]
+                if split is not None:          # env -S 'cmd args': the string is the command
+                    try:
+                        parts = shlex.split(split)
+                    except ValueError:
+                        parts = split.split()
+                    more_assigns, rest = _strip_wrappers(parts + words[i:])
+                    return assigns + more_assigns, rest
                 if flag in WRAPPER_VALUE_FLAGS.get(b, ()) and i < len(words):
                     i += 1
             i += WRAPPER_SKIP_ARGS.get(b, 0)
@@ -1034,14 +1085,15 @@ def _h_find(cmd, args, ctx, stdin, detail):
     roots = roots or ["."]
     root_t = _pathify(_everything_or(roots[:1], ctx), ctx)[0]
     names = [args[k + 1] for k, a in enumerate(args) if a in ("-name", "-iname") and k + 1 < len(args)]
-    effs: list[Effect] = []
+    effs: list[Effect] = [Effect("write", ctx.N(args[k + 1]), detail=detail)
+                          for k, a in enumerate(args) if a in ("-fprint", "-fprint0", "-fls", "-fprintf") and k + 1 < len(args)]
 
     def with_filter(action: str) -> list[Effect]:
-        """the search root (sound for path rules) plus root/**/<name> (lets name/pattern-scoped rules see the filter)"""
-        out = [Effect(action, root_t, detail=detail, certain=False)]
+        """With a name filter: root/**/<name> per filter (the root itself would over-block rules on unrelated
+        paths, e.g. `find . -name __pycache__ -delete` under "never delete data/"). Otherwise the root."""
         if names and root_t != UNKNOWN:
-            out.append(Effect(action, f"**/{names[0]}" if root_t == EVERYTHING else f"{root_t}/**/{names[0]}", detail=detail, certain=False))
-        return out
+            return [Effect(action, f"**/{n}" if root_t == EVERYTHING else f"{root_t}/**/{n}", detail=detail, certain=False) for n in names]
+        return [Effect(action, root_t, detail=detail, certain=False)]
     if "-delete" in args:
         effs += with_filter("delete")
     i = 0
@@ -1067,12 +1119,28 @@ def _h_find(cmd, args, ctx, stdin, detail):
     return effs or [Effect("read", root_t if root_t != EVERYTHING else ".", detail=detail)]
 
 
+def _target_dir(args: list[str]) -> str | None:
+    """Value of -t DIR / --target-directory DIR / --target-directory=DIR."""
+    for k, a in enumerate(args):
+        if a in ("-t", "--target-directory") and k + 1 < len(args):
+            return args[k + 1]
+        if a.startswith("--target-directory="):
+            return a.split("=", 1)[1]
+        if a.startswith("-t") and len(a) > 2 and not a.startswith("--"):
+            return a[2:]
+    return None
+
+
+def _in_dir(d: str, src: str) -> str:
+    return posixpath.join(d, posixpath.basename(src.rstrip("/")))
+
+
 def _h_mv(cmd, args, ctx, stdin, detail):
     pos = _positionals(args, {"-t", "--target-directory", "-S", "--suffix"})
-    tdir = next((args[k + 1] for k, a in enumerate(args) if a in ("-t", "--target-directory") and k + 1 < len(args)), None)
+    tdir = _target_dir(args)
     if tdir:
-        srcs, dst = pos, tdir
-    elif len(pos) >= 2:
+        return [Effect("move", ctx.N(s), detail=detail) for s in pos] + [Effect("write", ctx.N(_in_dir(tdir, s)), detail=detail) for s in pos]
+    if len(pos) >= 2:
         srcs, dst = pos[:-1], pos[-1]
     else:
         return [Effect("move", UNKNOWN, detail=detail, certain=False)]
@@ -1086,6 +1154,9 @@ def _h_cp(cmd, args, ctx, stdin, detail):
         return _h_rsync(args, ctx, detail)
     vals = {"-t", "--target-directory", "-S", "--suffix"} | ({"-m", "--mode", "-o", "-g", "--owner", "--group"} if cmd == "install" else set())
     pos = _positionals(args, vals)
+    tdir = _target_dir(args)
+    if tdir:
+        return [Effect("write", ctx.N(_in_dir(tdir, s)), detail=detail) for s in pos] or [Effect("write", ctx.N(tdir), detail=detail)]
     if len(pos) < 2:
         return [Effect("run", detail, kind="command", detail=detail)]
     dst = ctx.N(pos[-1])
@@ -1108,9 +1179,9 @@ def _h_rsync(args, ctx, detail):
     dst = pos[-1]
     if dst not in remote:
         effs.append(Effect("write", ctx.N(dst), detail=detail))
-        if "--delete" in args or any(a.startswith("--delete") for a in args):
+        if any(a == "--del" or a.startswith("--delete") for a in args):
             effs.append(Effect("delete", ctx.N(dst), detail=detail))
-    if "--remove-source-files" in args:
+    if "--remove-source-files" in args or "--remove-sent-files" in args:
         effs += [Effect("delete", ctx.N(s), detail=detail) for s in pos[:-1] if s not in remote]
     return effs
 
@@ -1176,9 +1247,102 @@ def _h_attr(cmd, args, ctx, stdin, detail):
     pos = _positionals(args, vals)
     if cmd in ("chmod", "chown", "chgrp") and pos:
         pos = pos[1:]                               # the mode / owner
-    if cmd == "ln" and len(pos) >= 2:
-        pos = pos[-1:]                              # only the link name is written
+    if cmd == "ln":
+        return _ln(args, ctx, detail)
     return [Effect(act, ctx.N(p), detail=detail) for p in pos] or [Effect(act, UNKNOWN, detail=detail)]
+
+
+def _ln(args: list[str], ctx: Ctx, detail: str) -> list[Effect]:
+    """ln [-s] SRC.. DST: writes the link name, and (uncertain) the source, which becomes writable
+    under another name (hard link) or through the symlink."""
+    pos = _positionals(args, {"-t", "--target-directory", "-S", "--suffix"})
+    symbolic = any(a == "--symbolic" or (a.startswith("-") and not a.startswith("--") and "s" in a) for a in args)
+    tdir = _target_dir(args)
+    if tdir:
+        pairs_ = [(s, _in_dir(tdir, s)) for s in pos]
+    elif len(pos) >= 2:
+        dst = pos[-1]
+        pairs_ = [(s, _in_dir(dst, s) if len(pos) > 2 else dst) for s in pos[:-1]]
+    elif len(pos) == 1:
+        pairs_ = [(pos[0], posixpath.basename(pos[0].rstrip("/")))]
+    else:
+        return [Effect("write", UNKNOWN, detail=detail)]
+    effs: list[Effect] = []
+    for src, link in pairs_:
+        effs.append(Effect("write", ctx.N(link), detail=detail))
+        real_src = src if not symbolic or posixpath.isabs(src) else posixpath.join(posixpath.dirname(link), src)
+        effs.append(Effect("edit", ctx.N(real_src), detail=f"{detail} (link makes it writable as {link})", certain=False))
+    return effs
+
+
+def _h_sort_like(cmd, args, ctx, stdin, detail):
+    """sort -o F, uniq IN OUT, sponge F, split/csplit PREFIX: output files."""
+    if cmd == "sort":
+        outs = [args[k + 1] for k, a in enumerate(args) if a == "-o" and k + 1 < len(args)]
+        outs += [a.split("=", 1)[1] for a in args if a.startswith("--output=")]
+        outs += [a[2:] for a in args if a.startswith("-o") and len(a) > 2 and not a.startswith("--")]
+        reads = _positionals(args, {"-o", "-k", "-t", "-T", "-S", "--parallel", "--key", "--field-separator"})
+    elif cmd == "uniq":
+        pos = _positionals(args, {"-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"})
+        outs, reads = pos[1:2], pos[:1]
+    elif cmd == "sponge":
+        outs, reads = _positionals(args), []
+    elif cmd == "split":
+        pos = _positionals(args, {"-l", "-b", "-C", "-n", "-a", "-t", "--additional-suffix", "--lines", "--bytes", "--number", "--filter"})
+        outs, reads = [(pos[1] if len(pos) > 1 else "x") + "*"], pos[:1]
+    else:  # csplit
+        pre = next((args[k + 1] for k, a in enumerate(args) if a in ("-f", "--prefix") and k + 1 < len(args)), "xx")
+        pos = _positionals(args, {"-f", "--prefix", "-b", "--suffix-format", "-n", "--digits"})
+        outs, reads = [pre + "*"], pos[:1]
+    effs = [Effect("write", ctx.N(o), detail=detail) for o in outs if o not in _DEVNULLS and o != "-"]
+    return effs or [Effect("read", ctx.N(reads[0]) if reads and reads[0] != "-" else ".", detail=detail)]
+
+
+_COMPRESSORS = {"gzip": ".gz", "bzip2": ".bz2", "xz": ".xz", "lzma": ".lzma", "lz4": ".lz4", "zstd": ".zst", "compress": ".Z",
+                "pigz": ".gz", "pbzip2": ".bz2", "lzip": ".lz", "brotli": ".br"}
+_DECOMPRESSORS = {"gunzip": "gzip", "bunzip2": "bzip2", "unxz": "xz", "unlzma": "lzma", "unlz4": "lz4", "unzstd": "zstd",
+                  "uncompress": "compress", "unpigz": "pigz"}
+
+
+def _h_compress(cmd, args, ctx, stdin, detail):
+    """gzip f -> f.gz and f is removed (unless -k/-c); gunzip f.gz -> f. zstd/lz4/brotli keep unless --rm."""
+    tool = _DECOMPRESSORS.get(cmd, cmd)
+    ext = _COMPRESSORS[tool]
+    longs = {a for a in args if a.startswith("--")}
+    shorts = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--") and len(a) > 1)
+    if "l" in shorts or "t" in shorts or longs & {"--list", "--test", "--help", "--version"} or "h" in shorts or "V" in shorts:
+        return [Effect("read", ".", detail=detail)]
+    decompress = cmd in _DECOMPRESSORS or "d" in shorts or longs & {"--decompress", "--uncompress"}
+    to_stdout = "c" in shorts or longs & {"--stdout", "--to-stdout"}
+    keeps_by_default = tool in ("zstd", "lz4", "brotli")
+    keep = to_stdout or "k" in shorts or "--keep" in longs or (keeps_by_default and "--rm" not in longs)
+    out_flag = next((args[k + 1] for k, a in enumerate(args) if a == "-o" and k + 1 < len(args)), None) if tool in ("zstd", "lz4", "brotli") else None
+    files = [f for f in _positionals(args, {"-o", "-S", "--suffix", "-T", "-b"}) if f != "-"]
+    effs: list[Effect] = []
+    for f in files:
+        if out_flag:
+            out = out_flag
+        elif decompress:
+            out = f[: -len(ext)] if f.endswith(ext) else f + ".out"
+        else:
+            out = f + ext
+        if not to_stdout:
+            effs.append(Effect("write", ctx.N(out), detail=detail))
+        if not keep:
+            effs.append(Effect("delete", ctx.N(f), detail=f"{detail} (removes the original)"))
+    return effs or [Effect("run", detail, kind="command", detail=detail)]
+
+
+def _h_zip(cmd, args, ctx, stdin, detail):
+    pos = _positionals(args, {"-P", "--password", "-O", "--output-file", "-b", "-n", "-t", "-tt", "-x", "-i"})
+    if not pos:
+        return [Effect("run", detail, kind="command", detail=detail)]
+    shorts = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--"))
+    archive, files = pos[0], pos[1:]
+    effs = [Effect("write" if "d" not in shorts else "edit", ctx.N(archive), detail=detail)]
+    if "m" in shorts or "--move" in args:
+        effs += [Effect("delete", ctx.N(f), detail=f"{detail} (moves files into the archive)") for f in files]
+    return effs
 
 
 def _h_patch(cmd, args, ctx, stdin, detail):
@@ -1336,35 +1500,81 @@ def _h_su(cmd, args, ctx, stdin, detail):
     return [Effect("run", detail, kind="command", detail=detail)]
 
 
-def _h_xargs(cmd, args, ctx, stdin, detail):
-    vals = {"-n", "-I", "-i", "-d", "-P", "-L", "-l", "-s", "-a", "-E", "-e", "--max-args", "--max-procs", "--delimiter", "--arg-file"}
-    i, repl = 0, None
-    while i < len(args) and args[i].startswith("-"):
-        if args[i] in ("-I",) and i + 1 < len(args):
-            repl = args[i + 1]
-        if args[i] in vals:
-            i += 1
-        i += 1
-    inner = args[i:]
+def _run_per_item(inner: list[str], items: list[str] | None, repl: str | None, ctx: Ctx, detail: str) -> list[Effect]:
+    """Run `inner` once per input item (xargs / parallel). items None = input not statically known."""
     if not inner or ctx.depth > MAX_DEPTH:
         return [_opaque(UNKNOWN, detail)]
-    items = stdin.text.split() if stdin.kind == "text" else None
+    sub = ctx.child(depth=ctx.depth + 1)
+
+    def argv_for(item: str) -> list[str]:
+        if repl and any(repl in a for a in inner):
+            return [a.replace(repl, item) for a in inner]
+        return inner + [item]
     if items is not None:
-        if repl:
-            argv = [a.replace(repl, items[0] if items else "") for a in inner]
-        else:
-            argv = inner + items
-        effs, _ = _classify_argv(argv, ctx.child(depth=ctx.depth + 1), Stdin())
-        return effs
-    effs, _ = _classify_argv(inner + [UNKNOWN], ctx.child(depth=ctx.depth + 1), Stdin())
+        effs: list[Effect] = []
+        for it in items[:64]:
+            effs += _classify_argv(argv_for(it), sub, Stdin())[0]
+        return effs or _classify_argv(inner, sub, Stdin())[0]
+    effs, _ = _classify_argv(argv_for(UNKNOWN), sub, Stdin())
     if not effs:
         return [_opaque(UNKNOWN, detail)]
     for e in effs:
         e.certain = False
-        if e.target != EVERYTHING and e.kind == "path":
-            e.target = UNKNOWN
         e.detail = detail
     return effs
+
+
+def _h_xargs(cmd, args, ctx, stdin, detail):
+    vals = {"-n", "-I", "-d", "-P", "-L", "-l", "-s", "-a", "-E", "-e", "--max-args", "--max-procs", "--delimiter", "--arg-file"}
+    i, repl, lines = 0, None, False
+    while i < len(args) and args[i].startswith("-"):
+        a = args[i]
+        if a == "-I" and i + 1 < len(args):
+            repl, lines = args[i + 1], True
+        elif a.startswith("-I") and len(a) > 2:
+            repl, lines = a[2:], True
+        elif a == "-i" or a.startswith("--replace"):
+            repl, lines = (a.split("=", 1)[1] if "=" in a else (a[2:] if a.startswith("-i") and len(a) > 2 else "{}")), True
+        if a in vals:
+            i += 1
+        i += 1
+    items = None
+    if stdin.kind == "text":
+        items = [l for l in stdin.text.splitlines() if l.strip()] if lines else stdin.text.split()
+        if not repl:
+            return _classify_argv(args[i:] + items, ctx.child(depth=ctx.depth + 1), Stdin())[0] if args[i:] else [_opaque(UNKNOWN, detail)]
+    return _run_per_item(args[i:], items, repl, ctx, detail)
+
+
+_PARALLEL_VALS = {"-j", "--jobs", "-N", "-P", "-S", "--sshlogin", "--colsep", "-C", "-d", "--delimiter", "-a", "--arg-file",
+                  "--timeout", "--halt", "-L", "-n", "--max-args", "--tmpdir", "--joblog", "--results", "-I", "--workdir", "--wd"}
+
+
+def _h_parallel(cmd, args, ctx, stdin, detail):
+    """GNU parallel CMD ::: ARGS (or ARGS from stdin); without CMD the args are commands."""
+    i, repl = 0, "{}"
+    while i < len(args) and args[i].startswith("-") and args[i] not in (":::", "::::"):
+        if args[i] == "-I" and i + 1 < len(args):
+            repl = args[i + 1]
+        if args[i] in _PARALLEL_VALS:
+            i += 1
+        i += 1
+    rest = args[i:]
+    if ":::" in rest or ":::+" in rest:
+        k = next(j for j, a in enumerate(rest) if a in (":::", ":::+"))
+        inner = rest[:k]
+        items = [a for a in rest[k + 1:] if a not in (":::", ":::+", "::::")]
+        if not inner:      # parallel ::: 'cmd1' 'cmd2'
+            return [e for it in items for e in _classify_text(it, ctx.child(depth=ctx.depth + 1))]
+        return _run_per_item(inner, items, repl, ctx, detail)
+    if "::::" in rest:
+        return _run_per_item(rest[:rest.index("::::")], None, repl, ctx, detail)
+    items = [l for l in stdin.text.splitlines() if l.strip()] if stdin.kind == "text" else None
+    if not rest:
+        if items is not None:
+            return [e for it in items for e in _classify_text(it, ctx.child(depth=ctx.depth + 1))]
+        return [_opaque(UNKNOWN, detail)]
+    return _run_per_item(rest, items, repl, ctx, detail)
 
 
 # ----------------------------------------------------------------------------- stdout producers (for pipes)
@@ -1484,6 +1694,8 @@ def _git_config_alias(name: str, gcwd: str, ctx: Ctx) -> str | None:
         return None
     g = _git_dir_of(gcwd)
     cfgs = [posixpath.join(g, "config")] if g else []
+    if any(ctx.stale(c) for c in cfgs):
+        return None
     cfgs.append(os.path.expanduser("~/.gitconfig"))
     for cfg in cfgs:
         try:
@@ -1634,10 +1846,28 @@ def _git_checkout(sub, rest, ctx, detail):
         return effs
     if any(a in ("-f", "--force") for a in rest) or (sub == "switch" and "--discard-changes" in rest):
         return [Effect("discard", EVERYTHING, detail=detail), Effect("run", detail, kind="command", detail=detail)]
-    if sub == "checkout" and rpos and (rpos[0] in (".", "*") or "/" in rpos[0] or "." in rpos[0]) and not any(a in ("-b", "-B") for a in rest):
-        paths = _everything_or(rpos, ctx)
-        return [Effect("discard", p, detail=detail, certain=False) for p in _pathify(paths, ctx)]
+    if sub != "checkout" or any(a in ("-b", "-B", "--orphan", "-t", "--track", "--detach", "-p", "--patch") for a in rest):
+        return [Effect("run", detail, kind="command", detail=detail)]
+    rpos = _positionals(rest, {"--conflict", "--pathspec-from-file"})
+    if len(rpos) >= 2:          # checkout <rev> <path>...: overwrites the paths with <rev>'s content
+        paths = _pathify(_everything_or(rpos[1:], ctx), ctx)
+        return [Effect("discard", p, detail=detail, certain=False) for p in paths] + \
+               [Effect("write", p, detail=detail, certain=False) for p in paths]
+    if rpos:
+        p0 = rpos[0]
+        ap = ctx.abs(p0)
+        on_disk = ctx.fs and ctx.root is not None and os.path.isdir(ctx.root)
+        is_path = p0 in (".", "*") or (os.path.exists(ap) if (on_disk and ap) else ("/" in p0 or "." in p0))
+        if is_path and not (on_disk and _looks_like_ref(p0, ctx) and not os.path.exists(ap or "")):
+            return [Effect("discard", p, detail=detail, certain=False) for p in _pathify(_everything_or(rpos, ctx), ctx)]
     return [Effect("run", detail, kind="command", detail=detail)]
+
+
+def _looks_like_ref(name: str, ctx: Ctx) -> bool:
+    g = _git_dir_of(ctx.cwd) if ctx.cwd_known else None
+    if not g:
+        return False
+    return any(os.path.exists(posixpath.join(g, d, name)) for d in ("refs/heads", "refs/tags", "refs/remotes"))
 
 
 def _git_restore(sub, rest, ctx, detail):
@@ -1701,6 +1931,14 @@ def _git_apply(sub, rest, ctx, detail):
 
 def _git_network(sub, rest, ctx, detail):
     rpos = _paths_after_opts(rest)
+    if sub == "lfs" and rpos[:1] == ["push"]:
+        return _git_push("push", rest[rest.index("push") + 1:], ctx, detail) + [Effect("network", "git lfs", kind="url", detail=detail)]
+    if sub == "submodule" and rpos[:1] == ["foreach"]:
+        k = rest.index("foreach")
+        inner = [a for a in rest[k + 1:] if a not in ("--recursive", "-q", "--quiet")]
+        sub_ctx = ctx.child(depth=ctx.depth + 1, cwd_known=False)
+        effs = _classify_text(inner[0], sub_ctx) if len(inner) == 1 else _classify_argv(inner, sub_ctx, Stdin())[0]
+        return _uncertain(effs, "git submodule foreach") or [Effect("run", detail, kind="command", detail=detail)]
     if sub == "remote" and rpos[:1] not in (["update"], ["prune"], ["show"]):
         return [Effect("run", detail, kind="command", detail=detail)]
     if sub == "submodule" and rpos[:1] not in (["update"], ["add"], ["sync"], ["foreach"]):
@@ -1736,7 +1974,7 @@ _GIT_SUBS = {
     "commit": _git_history, "filter-branch": _git_history, "filter-repo": _git_history, "rm": _git_rm, "mv": _git_mv,
     "apply": _git_apply, "am": _git_apply, "fetch": _git_network, "pull": _git_network, "clone": _git_network,
     "ls-remote": _git_network, "remote": _git_network, "submodule": _git_network, "lfs": _git_network,
-    "send-email": _git_network, "request-pull": _git_run, "config": _git_config,
+    "send-email": _git_network, "request-pull": _git_run, "config": _git_config, "send-pack": _git_push,
 }
 
 
@@ -2157,7 +2395,8 @@ def _make_recipe_effects(ctx: Ctx, mfile: str | None, targets: list[str], detail
 
 _INFRA = {"terraform", "tofu", "kubectl", "helm", "aws", "gcloud", "gsutil", "az", "docker", "docker-compose", "podman", "fly", "flyctl",
           "vercel", "heroku", "pulumi", "ansible-playbook", "ansible", "psql", "mysql", "dropdb", "redis-cli", "mongo", "mongosh",
-          "netlify", "serverless", "sls", "eksctl", "kustomize", "skaffold", "argocd", "oc", "doctl", "wrangler"}
+          "netlify", "serverless", "sls", "eksctl", "kustomize", "skaffold", "argocd", "oc", "doctl", "wrangler",
+          "sqlite3", "duckdb", "clickhouse-client", "cqlsh", "pg_restore", "mongorestore"}
 
 
 def _h_infra(cmd, args, ctx, stdin, detail):
@@ -2329,6 +2568,12 @@ class _PyScan:
                     self.add("exec_opaque", node.module, kind="opaque", note="relative import")
         for _ in range(2):   # two passes so that chained constants resolve
             for node in ast.walk(self.tree):
+                if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
+                        and isinstance(node.value, (ast.Name, ast.Attribute)):
+                    # f = open / o = os / r = os.remove: the name is an alias of a callable or module
+                    q = self.qual(node.value)
+                    if q and q != node.targets[0].id:
+                        self.aliases[node.targets[0].id] = re.sub(r"^(?:__builtins__|builtins)\.", "", q)
                 if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                     v = self.const(node.value)
                     if v is not None:
@@ -2345,7 +2590,7 @@ class _PyScan:
         return self.effects
 
     def call(self, node: ast.Call) -> None:
-        q = self.qual(node.func) or ""
+        q = re.sub(r"^(?:__builtins__|builtins)\.", "", self.qual(node.func) or "")
         args = node.args
         kw = {k.arg: k.value for k in node.keywords if k.arg}
         a0 = args[0] if args else None
@@ -2748,7 +2993,10 @@ _HANDLERS = {
     "ruff": _h_formatter, **{k: _h_formatter for k in _FORMATTERS},
     "eval": _h_eval, "source": _h_eval, ".": _h_eval, "trap": _h_trap, "watch": _h_watch, "su": _h_su, "xargs": _h_xargs,
     "echo": _h_echo, "printf": _h_echo, "base64": _h_base64, "cat": _h_cat, "rev": _h_rev_tr,
-    "git": _h_git,
+    "git": _h_git, "hub": _h_git,
+    "sort": _h_sort_like, "uniq": _h_sort_like, "sponge": _h_sort_like, "split": _h_sort_like, "csplit": _h_sort_like,
+    **{k: _h_compress for k in list(_COMPRESSORS) + list(_DECOMPRESSORS)}, "zip": _h_zip,
+    "parallel": _h_parallel,
     "curl": _h_curl, "wget": _h_curl, "http": _h_curl, "https": _h_curl, "ssh": _h_ssh, "scp": _h_curl, "sftp": _h_curl,
     "nc": _h_net_simple, "ncat": _h_net_simple, "netcat": _h_net_simple, "telnet": _h_net_simple, "ftp": _h_net_simple,
     "ping": _h_net_simple, "ping6": _h_net_simple, "dig": _h_net_simple, "nslookup": _h_net_simple, "host": _h_net_simple,

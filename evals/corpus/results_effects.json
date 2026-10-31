@@ -1159,11 +1159,6 @@
    "predicted": [
     [
      "delete",
-     "<everything>",
-     false
-    ],
-    [
-     "delete",
      "**/*.pyc",
      false
     ]
@@ -1220,11 +1215,6 @@
     ]
    ],
    "predicted": [
-    [
-     "delete",
-     "<everything>",
-     false
-    ],
     [
      "delete",
      "**/*.pyc",

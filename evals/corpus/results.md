@@ -170,3 +170,58 @@ Effect corpus
 7. Interpreter-derived effects are `certain=False` by design, so under a forbid rule they `ask` rather than deny.
    11 of the 18 red-team asks are interpreter-derived (python/perl/node/ruby/awk). If deny is wanted for literal-path python (`os.remove('x')`), the monitor could treat
    `certain=False` with a concrete target differently from an unknown target.
+
+---
+
+# Round 2: shell findings from docs/REVIEW.md
+
+The "before" numbers were measured on the current tree, which includes the coordinator's monitor/rules changes
+(opaque runs match every rule, prod scopes are token-anchored). The legacy corpus is now written to `evals/corpus/legacy/`.
+
+| eval | before round 2 | after round 2 |
+|---|---|---|
+| Red team (`--effects`) | 1 bypass / 89 caught / 3 ask / 1 false_block | 1 bypass / 89 caught / 3 ask / 1 false_block |
+| Legacy, ask and deny policies | 11/326 missed (3%), 7/147 false blocks (5%) | 11/326 (3%), 7/147 (5%) |
+| Legacy, allow policy | 36/326 missed, 1/147 false blocks | 39/326, 1/147 (see note) |
+| Effect corpus | 218/221 exact | 218/221 exact |
+| REVIEW.md shell bypass commands (32, via `monitor.evaluate` in a temp repo) | most allow (they are verified bypasses) | 28 deny, 3 ask, 1 allow (intended) |
+
+The existing corpora do not contain the round-2 commands, so their numbers do not move. The new cases are covered by
+`tests/test_shell.py`, in the `TestStaleOnDiskPrograms` and `TestRound2*` classes.
+
+Fixed:
+- **B2 (stale on-disk programs).** `Ctx.written` records paths written earlier in the same command, and is shared
+  across subshells, functions and pipes. Reading such a path, or any path once an unknown target was written, returns
+  nothing. Running make, npm run, a script, a stdin file or a `.git/config` alias after rewriting it is therefore an
+  uncertain `exec_opaque` (ask).
+- **B4/B5 (links).** `ln [-s] SRC DST` writes DST and makes an uncertain edit of SRC.
+- **B6.** `git checkout <rev> <path>...` without `--` is discard + write. With a single positional, the disk decides:
+  a path is checked out from the index, a branch is a plain switch.
+- **B8.** `git send-pack`, `git lfs push`, `git submodule foreach <cmd>` (the inner command is classified) and
+  `hub` (treated as git) all produce push effects.
+- **B9.** `env -S '<cmd>'` and `--split-string=` are split and classified.
+- **B10/B11.** `cp`/`mv`/`ln -t DIR` and `--target-directory=DIR` write `DIR/name`. `sort -o`, `uniq IN OUT`, `sponge`,
+  `split`/`csplit` prefixes, `find -fprint/-fls` and `zip` are writes. gzip/bzip2/xz/lzma/lzip/compress (and zstd/lz4
+  with `--rm`) delete the original and write the output; `-k` and `-c` keep the original.
+- **B12.** `busybox <applet>` is unwrapped. `parallel CMD ::: ARGS` and `xargs -I{}`/`-i` run once per item; with
+  unknown input the item target is `<unknown>` (uncertain).
+- **B13.** `rsync --del`, `--delete-*` and `--remove-sent-files` are deletes.
+- **B14.** The Python AST tracks name bindings (`f=open`, `o=os`, `r=os.remove`, `__builtins__.open`).
+- **B19.** `psql`, `mysql`, `sqlite3`, `duckdb` and others: `DROP`, `TRUNCATE` and `DELETE FROM` give `deploy_destroy`.
+  In `effects.py`, `ACTION_TREE["delete"]` now includes `deploy_destroy`, so "don't delete anything" covers
+  `DROP TABLE` and `terraform destroy`.
+- **find.** With `-name`/`-iname` filters only `root/**/<name>` targets are emitted (uncertain), not the root. This
+  removes the false block on `find . -name __pycache__ -o -name .pytest_cache -delete` under "never delete under data/".
+
+Note on the legacy corpus under the allow policy, 36 -> 39 missed: S1-011, S2-053 and S2-054 (`find data -name '*.csv'
+-delete` etc.) now emit only `data/**/*.csv`. The monitor treats a glob target as an uncertain match, which the allow
+policy lets through. They are still blocked under ask and deny. Suggestion for rules.py: a glob target whose literal
+prefix (`data/`) lies inside a path scope is a certain match.
+
+Remaining gaps (shell side):
+- del-31 `sed -i 'd' f` is still classified as an edit (deliberate).
+- B3 git hooks (`.git/hooks/*`, `core.hooksPath`) and B7 working-tree-rewriting git commands (merge, cherry-pick,
+  `stash pop`, `read-tree -u`, `checkout-index`, `worktree add`) are still `run`. They were not in this round's scope.
+- B20: an overwriting `cp`/`ln -f`/`>` on an existing file is still only a `write`, not a `discard`.
+- The `ln -s` link target is not registered in the context, so later segments do not resolve through it.
+  The source is caught as an uncertain edit instead.

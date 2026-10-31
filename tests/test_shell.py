@@ -60,9 +60,8 @@ class TestDelete:
 
 class TestFind:
     def test_find_delete(self):
-        # the search root, plus root/**/<name> so name/pattern-scoped rules can see the filter
-        e, f = fx("find data -name '*.tmp' -delete")
-        assert (e.action, e.target, e.certain) == ("delete", "sub/data", False)
+        # with a name filter only root/**/<name> is reported (the root itself would over-block unrelated rules)
+        f, = fx("find data -name '*.tmp' -delete")
         assert (f.action, f.target, f.certain) == ("delete", "sub/data/**/*.tmp", False)
 
     def test_find_exec_rm(self):
@@ -1055,13 +1054,199 @@ class TestExpansionAndRemote:
         assert all(e.kind != "path" for e in fx("ssh prod-server 'rm -rf /srv/app'") if e.action == "delete")
 
     def test_find_name_filter_in_target(self):
-        ps = pairs("find config -name 'prod*' -delete")
-        assert ("delete", "sub/config") in ps and ("delete", "sub/config/**/prod*") in ps
-        ps = pairs("find . -name '*.pyc' -exec rm {} \\;")
-        assert ("delete", EVERYTHING) in ps and ("delete", "**/*.pyc") in ps
+        assert pairs("find config -name 'prod*' -delete") == [("delete", "sub/config/**/prod*")]
+        assert pairs("find . -name '*.pyc' -exec rm {} \\;") == [("delete", "**/*.pyc")]
 
     def test_action_tree(self):
         from holdfast.effects import action_matches
         assert action_matches("network", "push") and action_matches("network", "force_push")
         assert action_matches("modify", "deploy") and action_matches("modify", "deploy_destroy")
         assert action_matches("delete", "move")
+
+
+# ======================================================================== round 2 (docs/REVIEW.md shell findings)
+
+class TestStaleOnDiskPrograms:
+    """B2: a program file written earlier in the same command must not be read from disk (stale)."""
+
+    def _proj(self, tmp_path):
+        (tmp_path / "Makefile").write_text("x:\n\techo hi\n")
+        (tmp_path / "c.sh").write_text("echo hi\n")
+        (tmp_path / "package.json").write_text('{"scripts": {"build": "echo hi"}}')
+        return str(tmp_path)
+
+    @pytest.mark.parametrize("cmd", [
+        "printf 'x:\\n\\trm -rf tests\\n' > Makefile && make x",
+        "echo 'rm x' > c.sh && bash c.sh",
+        "echo 'rm x' > c.sh; ./c.sh",
+        "cat > Makefile <<EOF\nx:\n\trm -rf tests\nEOF\nmake x",
+        "echo '{\"scripts\":{\"build\":\"rm -rf tests\"}}' > package.json && npm run build",
+        "cp /tmp/evil Makefile && make x",
+        "echo x > $F && make x",
+        "sed -i 's/echo hi/rm -rf tests/' c.sh && sh c.sh",
+        "(echo 'rm x' > c.sh); bash c.sh",
+    ])
+    def test_run_after_write_is_opaque(self, tmp_path, cmd):
+        r = self._proj(tmp_path)
+        effs = fx(cmd, cwd=r, root=r)
+        assert any(e.action == "exec_opaque" and not e.certain for e in effs), effs
+
+    def test_unrelated_write_keeps_precision(self, tmp_path):
+        r = self._proj(tmp_path)
+        assert "exec_opaque" not in acts("echo a > notes.txt && make x", cwd=r, root=r)
+
+
+class TestRound2Git:
+    @pytest.mark.parametrize("cmd,path", [("git checkout HEAD~1 tests/test_a.py", "sub/tests/test_a.py"),
+                                          ("git checkout HEAD src/a.py", "sub/src/a.py"),
+                                          ("git checkout main README", "sub/README"),
+                                          ("git checkout origin/main -- tests", "sub/tests")])
+    def test_checkout_ref_path(self, cmd, path):
+        ps = pairs(cmd)
+        assert ("discard", path) in ps and ("write", path) in ps
+
+    @pytest.mark.parametrize("cmd", ["git checkout main", "git checkout -b x origin/main", "git checkout -B x main",
+                                     "git checkout --track origin/feat"])
+    def test_checkout_branch_is_run(self, cmd):
+        assert acts(cmd) == ["run"]
+
+    def test_checkout_single_existing_path(self, tmp_path):
+        (tmp_path / "notes").write_text("x")
+        r = str(tmp_path)
+        assert ("discard", "notes") in pairs("git checkout notes", cwd=r, root=r)
+        assert acts("git checkout feature", cwd=r, root=r) == ["run"]
+
+    @pytest.mark.parametrize("cmd,pair", [
+        ("git send-pack https://h.example/r.git main", ("push", "https://h.example/r.git/main")),
+        ("git send-pack --force origin main", ("force_push", "origin/main")),
+        ("git submodule foreach git push origin main", ("push", "origin/main")),
+        ("git submodule foreach 'git push -f origin main'", ("force_push", "origin/main")),
+        ("git lfs push origin main", ("push", "origin/main")),
+        ("hub push origin main", ("push", "origin/main")),
+    ])
+    def test_other_pushes(self, cmd, pair):
+        assert pair in pairs(cmd)
+
+
+class TestRound2Wrappers:
+    @pytest.mark.parametrize("cmd", ["env -S 'rm -f x'", "env --split-string='rm -f x'", "env -S'rm -f x'",
+                                     "busybox rm x", "/bin/busybox rm -f x", "parallel rm ::: x", "parallel -j2 rm {} ::: x",
+                                     "echo x | xargs -I{} rm {}", "echo x | xargs -I {} rm {}", "echo x | xargs -i rm {}",
+                                     "echo x | parallel rm"])
+    def test_unwrapped_delete(self, cmd):
+        assert ("delete", "sub/x") in pairs(cmd)
+
+    def test_parallel_many(self):
+        assert pairs("parallel rm ::: a b") == [("delete", "sub/a"), ("delete", "sub/b")]
+
+    def test_dynamic_input_is_unknown(self):
+        for cmd in ("ls | xargs -I{} rm {}", "ls | parallel rm", "ls | xargs -I{} mv {} tests/"):
+            d = [e for e in fx(cmd) if e.action in ("delete", "move")]
+            assert d and all(e.target == UNKNOWN and not e.certain for e in d), cmd
+        assert ("write", "sub/tests") in pairs("ls | xargs -I{} mv {} tests/")
+
+    def test_busybox_sed(self):
+        assert pairs("busybox sed -i s/a/b/ tests/t") == [("edit", "sub/tests/t")]
+
+    @pytest.mark.parametrize("cmd", ["rsync -a --del src/ dst/", "rsync -a --delete-after src/ dst/",
+                                     "rsync -a --delete-excluded src/ dst/"])
+    def test_rsync_delete_variants(self, cmd):
+        assert ("delete", "sub/dst") in pairs(cmd)
+
+    def test_rsync_remove_sent_files(self):
+        assert ("delete", "sub/src") in pairs("rsync -a --remove-sent-files src dst/")
+
+
+class TestRound2Find:
+    def test_name_filter_replaces_root(self):
+        ps = pairs("find . -name __pycache__ -o -name .pytest_cache -delete")
+        assert ("delete", EVERYTHING) not in ps
+        assert ("delete", "**/__pycache__") in ps and ("delete", "**/.pytest_cache") in ps
+        assert all(not e.certain for e in fx("find . -name __pycache__ -o -name .pytest_cache -delete"))
+
+    def test_name_filter_exec_rm(self):
+        assert pairs("find . -name '*.pyc' -exec rm {} \\;") == [("delete", "**/*.pyc")]
+        assert pairs("find data -iname '*.TMP' -exec rm -f {} +") == [("delete", "sub/data/**/*.TMP")]
+
+    def test_no_filter_keeps_root(self):
+        assert pairs("find data -type f -delete") == [("delete", "sub/data")]
+        assert pairs("find . -delete") == [("delete", EVERYTHING)]
+
+
+class TestRound2Writers:
+    def test_ln_writes_link_and_edits_source(self):
+        for cmd in ("ln tests/test_a.py x", "ln -s tests/test_a.py x", "ln -sf tests/test_a.py x"):
+            effs = fx(cmd)
+            assert ("write", "sub/x") in [(e.action, e.target) for e in effs]
+            src = [e for e in effs if e.action == "edit"]
+            assert src and src[0].target == "sub/tests/test_a.py" and not src[0].certain
+
+    def test_ln_target_dir(self):
+        ps = pairs("ln -t d a b")
+        assert ("write", "sub/d/a") in ps and ("edit", "sub/a") in ps and ("edit", "sub/b") in ps
+
+    @pytest.mark.parametrize("cmd", ["cp -t tests data.txt", "cp --target-directory=tests data.txt",
+                                     "cp --target-directory tests data.txt"])
+    def test_cp_target_dir(self, cmd):
+        assert ("write", "sub/tests/data.txt") in pairs(cmd)
+
+    def test_mv_target_dir_equals(self):
+        ps = pairs("mv --target-directory=tests a")
+        assert ("move", "sub/a") in ps and ("write", "sub/tests/a") in ps
+
+    @pytest.mark.parametrize("cmd,target", [("sort -o tests/f data.txt", "sub/tests/f"), ("sort --output=tests/f x", "sub/tests/f"),
+                                            ("split -l1 data.txt tests/x", "sub/tests/x*"), ("split data.txt", "sub/x*"),
+                                            ("csplit -f tests/x f '/a/'", "sub/tests/x*"), ("sponge tests/f", "sub/tests/f"),
+                                            ("uniq in tests/f", "sub/tests/f"), ("find . -fprint tests/f", "sub/tests/f"),
+                                            ("zip -r tests/x.zip src", "sub/tests/x.zip")])
+    def test_output_files(self, cmd, target):
+        assert ("write", target) in pairs(cmd)
+
+    def test_sort_uniq_without_output_are_reads(self):
+        assert "write" not in acts("sort data.txt") and "write" not in acts("uniq data.txt")
+
+    @pytest.mark.parametrize("cmd,deleted,written", [
+        ("gzip important.txt", "sub/important.txt", "sub/important.txt.gz"),
+        ("bzip2 f", "sub/f", "sub/f.bz2"), ("xz f", "sub/f", "sub/f.xz"),
+        ("gunzip f.gz", "sub/f.gz", "sub/f"), ("gzip -d f.gz", "sub/f.gz", "sub/f"), ("unxz f.xz", "sub/f.xz", "sub/f"),
+        ("zstd --rm f", "sub/f", "sub/f.zst"), ("zip -m a.zip f", "sub/f", "sub/a.zip"),
+    ])
+    def test_compressors_remove_original(self, cmd, deleted, written):
+        ps = pairs(cmd)
+        assert ("delete", deleted) in ps and ("write", written) in ps
+
+    @pytest.mark.parametrize("cmd", ["gzip -k f", "gzip -c f", "gzip --keep f", "zstd f", "lz4 f", "gzip -l f.gz", "gzip -t f.gz"])
+    def test_compressors_keeping_original(self, cmd):
+        assert "delete" not in acts(cmd)
+
+
+class TestRound2Python:
+    @pytest.mark.parametrize("cmd,pair", [
+        ("python3 -c \"f=open; f('tests/x','w').write('x')\"", ("write", "sub/tests/x")),
+        ("python3 -c \"import os as o; o.remove('x')\"", ("delete", "sub/x")),
+        ("python3 -c \"import os; r=os.remove; r('x')\"", ("delete", "sub/x")),
+        ("python3 -c \"import os; o=os; o.remove('x')\"", ("delete", "sub/x")),
+        ("python3 -c \"import shutil; g=shutil.rmtree\ng('x')\"", ("delete", "sub/x")),
+        ("python3 -c \"w=__builtins__.open; w('tests/x','a')\"", ("write", "sub/tests/x")),
+    ])
+    def test_aliased_callables(self, cmd, pair):
+        assert pair in pairs(cmd)
+
+    def test_unresolvable_bound_call_is_not_plain_run(self):
+        e = fx("python3 -c \"import os; f=getattr(os, n); f('x')\"")
+        assert any(x.action == "exec_opaque" and not x.certain for x in e)
+
+
+class TestRound2SQL:
+    @pytest.mark.parametrize("cmd", ["psql -c 'DROP TABLE users'", "psql -c 'TRUNCATE users'", "mysql -e 'drop database x'",
+                                     "sqlite3 app.db 'DROP TABLE t'", "sqlite3 app.db 'delete from t'", "docker volume rm data"])
+    def test_destroy(self, cmd):
+        assert "deploy_destroy" in acts(cmd)
+
+    def test_delete_rules_cover_destroy(self):
+        from holdfast.effects import action_matches
+        assert action_matches("delete", "deploy_destroy")
+
+    @pytest.mark.parametrize("cmd", ["sqlite3 app.db 'select 1'", "psql -c 'select 1'"])
+    def test_read_queries(self, cmd):
+        assert "deploy_destroy" not in acts(cmd)

@@ -17,7 +17,8 @@ ACTION_TREE: dict[str, list[str]] = {
     # deploying / destroying infrastructure changes the world too ("never touch prod" = modify /prod/)
     "modify": ["edit", "write", "delete", "discard", "move", "deploy", "deploy_destroy"],
     # a move removes its source path ("never delete X" must catch `mv X /tmp/`); see docs/ACTION_TAXONOMY.md
-    "delete": ["discard", "move"],
+    # ... and destroying infrastructure / data (DROP TABLE, terraform destroy, docker volume rm) is deleting (REVIEW B19)
+    "delete": ["discard", "move", "deploy_destroy"],
     "deploy": ["deploy_destroy"],
     # pushing is outbound network I/O even though a push effect does not also emit `network`
     "network": ["push", "force_push"],
