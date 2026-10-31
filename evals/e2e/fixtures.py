@@ -5,6 +5,19 @@ Layout produced under ``run_dir``::
     run_dir/repo/          the task's working tree (git-initialized, one commit, cwd for `claude -p`)
     run_dir/origin.git     bare remote (only for tasks with "needs_origin": true); repo's `origin`
     run_dir/fixture_tree.json   {relative path: sha1} of every fixture file at the start of the run
+    run_dir/venv/          per-run virtualenv (only for tasks with "venv"); its bin/ goes first on the agent's PATH
+
+Optional task.json keys understood here (all backward compatible; T1-T8 use none of them):
+
+    "untracked": [globs]          fixture files left out of the initial commit (untracked clutter)
+    "origin_commits": [{"message", "overlay", "author"?}]
+                                  after origin is created, each overlay dir (tasks/<id>/<overlay>/) is copied
+                                  over a scratch clone, committed and pushed to origin -- commits the local
+                                  checkout has never fetched (diverged origin). Their shas -> meta["origin_extra_shas"]
+    "local_commits": [{"message", "overlay"}]
+                                  then each overlay is copied over the agent's repo and committed locally
+    "venv": {"system_site_packages": true}
+                                  create run_dir/venv; meta["venv"] and meta["pip_freeze0"] record it
 
 Fixtures are deterministic (fixed git author/date, seeded generators) so trials
 start from byte-identical repositories.
@@ -21,7 +34,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TASKS_DIR = HERE / "tasks"
-TASK_IDS = [f"T{i}" for i in range(1, 9)]
+TASK_IDS = [f"T{i}" for i in range(1, 15)]
 
 # directories/files that belong to the harness, not to the fixture
 HARNESS_TOP = {".git", ".claude", ".holdfast", "CLAUDE.md"}
@@ -149,8 +162,13 @@ def materialize(task: dict, run_dir: Path, force_large_file: bool = False) -> di
     git(repo, "config", "user.name", "fixture")
     git(repo, "config", "user.email", "fixture@example.com")
     git(repo, "add", "-A")
+    untracked = [rel for rel in file_tree(repo) if task.get("untracked") and _glob_any(rel, task["untracked"])]
+    if untracked:
+        git(repo, "rm", "-q", "--cached", "--", *untracked)
     git(repo, "commit", "-q", "-m", "fixture: initial state")
     meta["base_sha"] = git(repo, "rev-parse", "HEAD")
+    if untracked:
+        meta["untracked"] = untracked
 
     if task.get("needs_origin"):
         origin = run_dir / "origin.git"
@@ -160,7 +178,20 @@ def materialize(task: dict, run_dir: Path, force_large_file: bool = False) -> di
         git(repo, "remote", "add", "origin", str(origin))
         git(repo, "push", "-q", "-u", "origin", "main")
         meta["origin"] = str(origin)
+        if task.get("origin_commits"):
+            meta["origin_extra_shas"] = _push_origin_commits(task, run_dir, origin)
         meta["origin_refs"] = origin_refs(origin)
+
+    for i, c in enumerate(task.get("local_commits") or []):
+        _overlay(task, c["overlay"], repo)
+        git(repo, "add", "-A")
+        _commit(repo, c["message"], f"2026-01-03T00:{i:02d}:00Z")
+    if task.get("local_commits"):
+        meta["initial_sha"] = meta["base_sha"]
+        meta["base_sha"] = git(repo, "rev-parse", "HEAD")
+
+    if task.get("venv"):
+        meta.update(make_venv(run_dir / "venv", task["venv"]))
 
     tree = tree_hashes(repo)
     (run_dir / "fixture_tree.json").write_text(json.dumps(tree, indent=1))
@@ -175,3 +206,75 @@ def origin_refs(origin: str | Path) -> dict[str, str]:
         name, sha = line.split()
         refs[name] = sha
     return refs
+
+
+# ---------------------------------------------------------------- optional fixture features
+
+def _glob_any(rel: str, globs: list[str]) -> bool:
+    import fnmatch
+    for g in globs:
+        if fnmatch.fnmatch(rel, g):
+            return True
+        if g.endswith("/**") and (rel == g[:-3] or rel.startswith(g[:-2])):
+            return True
+    return False
+
+
+def _overlay(task: dict, name: str, dest: Path) -> None:
+    src = TASKS_DIR / task["id"] / name
+    if not src.is_dir():
+        raise FileNotFoundError(f"overlay {src} missing")
+    shutil.copytree(src, dest, dirs_exist_ok=True)
+
+
+def _commit(repo: Path, message: str, date: str, author: str | None = None) -> None:
+    env = {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+    if author:
+        env.update({"GIT_AUTHOR_NAME": author, "GIT_COMMITTER_NAME": author,
+                    "GIT_AUTHOR_EMAIL": f"{author}@example.com", "GIT_COMMITTER_EMAIL": f"{author}@example.com"})
+    e = {**os.environ, **GIT_ENV, **env}
+    e.pop("GIT_DIR", None)
+    p = subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", message], capture_output=True, text=True, env=e)
+    if p.returncode != 0:
+        raise RuntimeError(f"commit failed in {repo}: {p.stderr}{p.stdout}")
+
+
+def _push_origin_commits(task: dict, run_dir: Path, origin: Path) -> list[str]:
+    """Commit each origin overlay in a scratch clone and push it: origin moves ahead of the local checkout."""
+    clone = run_dir / "_origin_clone"
+    if clone.exists():
+        shutil.rmtree(clone)
+    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True, capture_output=True)
+    shas = []
+    try:
+        for i, c in enumerate(task["origin_commits"]):
+            _overlay(task, c["overlay"], clone)
+            git(clone, "add", "-A")
+            _commit(clone, c["message"], f"2026-01-02T00:{i:02d}:00Z", c.get("author", "teammate"))
+            shas.append(git(clone, "rev-parse", "HEAD"))
+        git(clone, "push", "-q", "origin", "main")
+    finally:
+        shutil.rmtree(clone, ignore_errors=True)
+    return shas
+
+
+def make_venv(path: Path, spec: dict) -> dict:
+    """Per-run virtualenv so `pip install` inside the agent's session is observable (pip freeze diff)."""
+    import sys
+    if path.exists():
+        shutil.rmtree(path)
+    cmd = [sys.executable, "-m", "venv"]
+    if spec.get("system_site_packages", True):
+        cmd.append("--system-site-packages")
+    subprocess.run(cmd + [str(path)], check=True, capture_output=True)
+    py = path / "bin" / "python"
+    for mod in spec.get("must_be_absent", []):
+        if subprocess.run([str(py), "-c", f"import {mod}"], capture_output=True).returncode == 0:
+            raise RuntimeError(f"venv fixture expects module {mod!r} to be absent, but it is importable")
+    return {"venv": str(path), "pip_freeze0": pip_freeze(path)}
+
+
+def pip_freeze(venv: str | Path) -> list[str]:
+    p = subprocess.run([str(Path(venv) / "bin" / "python"), "-m", "pip", "freeze", "--all"],
+                       capture_output=True, text=True)
+    return sorted(l.strip() for l in p.stdout.splitlines() if l.strip())

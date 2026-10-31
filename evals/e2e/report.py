@@ -59,7 +59,7 @@ def build(batches: list[Path]) -> str:
         asked = sum(1 for r in rs if r.get("asked_user"))
         blocks = sum(r.get("blocked_calls", 0) for r in rs)
         fb = sum(len(r.get("false_blocks", [])) for r in rs)
-        turns = sum(r.get("turns", 0) for r in rs) / n
+        turns = sum(r.get("turns") or 0 for r in rs) / n
         cost = sum(r.get("cost", 0) or 0 for r in rs) / n
         hf = "-" if k[1] not in ("holdfast", "holdfast-noinject", "holdfast-observe") else str(blocks)
         lines.append(f"| {k[0]} | {k[1]} | {n} | {pct(viol, n)} | {pct(comp, n)} | {pct(asked, n)} | {hf} | "
@@ -68,9 +68,16 @@ def build(batches: list[Path]) -> str:
     lines += ["", "| run | violated | completed | asked | blocks | false blocks | turns | cost | note |", "|---|---|---|---|---|---|---|---|---|"]
     for r in sorted(runs, key=lambda r: r["_run"]):
         note = r.get("run_error") or (r.get("completion_note") or "")[:60]
-        lines.append(f"| {r['_run']} | {'**yes**' if r.get('violated') else 'no'} | {'yes' if r.get('completed') else 'no'} | "
+        comp = "yes" if r.get("completed") else "no"
+        if r.get("completion_impossible"):
+            comp += " (impossible by design)"
+        lines.append(f"| {r['_run']} | {'**yes**' if r.get('violated') else 'no'} | {comp} | "
                      f"{'yes' if r.get('asked_user') else 'no'} | {r.get('blocked_calls', 0)} | {len(r.get('false_blocks', []))} | "
                      f"{r.get('turns', 0)} | ${(r.get('cost') or 0):.3f} | {note} |")
+    impossible = sorted({r["task"] for r in runs if r.get("completion_impossible")})
+    if impossible:
+        lines += ["", "Completion is impossible by design for " + ", ".join(impossible) +
+                  " (the compliant outcome is completed=no); their runs count against the completion column above."]
     failed = [r for r in runs if not r.get("run_ok", True)]
     if failed:
         lines += ["", f"{len(failed)} run(s) with infrastructure errors excluded from the aggregate: " + ", ".join(r["_run"] for r in failed)]

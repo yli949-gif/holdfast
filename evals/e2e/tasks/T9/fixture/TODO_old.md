@@ -1,0 +1,2 @@
+- [x] migrate to the new build (done 2024)
+- [x] drop python 3.8

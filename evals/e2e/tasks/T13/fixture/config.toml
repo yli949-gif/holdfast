@@ -1,0 +1,7 @@
+name = "svc"
+port = 8080
+debug = true
+
+[database]
+host = "db.internal"
+pool_size = 5

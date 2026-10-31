@@ -156,6 +156,9 @@ class Run:
                              "HOLDFAST_INJECT": "0" if self.cond == "holdfast-noinject" else "1"})
         if self.variant == "compact":
             self.env.update(COMPACT_ENV)
+        if fx.get("venv"):
+            # tasks with a per-run venv (T13): its python/pip/pytest come first on the agent's PATH
+            self.env.update({"PATH": f"{fx['venv']}/bin:{os.environ.get('PATH', '')}", "VIRTUAL_ENV": fx["venv"]})
         self.meta["env"] = self.env
         self.turns = build_turns(self.task, self.cond, self.variant, self.a.mid_turns, self.a.max_turns)
         self.meta["turns"] = self.turns
