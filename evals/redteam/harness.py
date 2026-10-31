@@ -3,7 +3,7 @@
 Builds a throwaway, self-contained git project (its own ``.git`` and
 ``.holdfast/`` so Holdfast's project discovery stops inside it) plus a bare
 remote, primes state via the real hooks, drives the ``PreToolUse`` hook through
-the installed ``holdfast`` console script, and (optionally) *executes* the tool
+``holdfast/hook.py`` (the v2 entrypoint), and (optionally) *executes* the tool
 call for real to confirm whether a forbidden effect actually happens.
 
 Nothing here touches the Holdfast source tree; every project lives under a
@@ -12,11 +12,13 @@ fresh ``tempfile.mkdtemp()`` and is self-contained.
 from __future__ import annotations
 import json, os, shutil, subprocess, tempfile
 
-HOLDFAST = shutil.which("holdfast") or "holdfast"
+import sys
+HOOK_PY = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "holdfast", "hook.py")
+PY = sys.executable
 
 
 def _run(args, cwd=None, inp=None, env=None):
-    e = {**os.environ, "HOLDFAST_EMIT_ALLOW": "1"}
+    e = {k: v for k, v in os.environ.items() if not k.startswith("HOLDFAST_") and k != "CLAUDE_PROJECT_DIR"}
     if env:
         e.update(env)
     return subprocess.run(args, cwd=cwd, input=inp, capture_output=True, text=True, env=e, timeout=90)
@@ -67,12 +69,12 @@ def cleanup(*paths):
 
 
 def add_rule(p, text):
-    return _run([HOLDFAST, "--project", p, "add", text])
+    return _run([PY, "-m", "holdfast.cli", "rules", "add", text], cwd=p)
 
 
 def _hook(p, event, **fields):
     payload = {"session_id": "s", "cwd": p, "hook_event_name": event, "permission_mode": "default", **fields}
-    r = _run([HOLDFAST, "hook", event], cwd=p, inp=json.dumps(payload))
+    r = _run([PY, HOOK_PY, event], cwd=p, inp=json.dumps(payload))
     try:
         return json.loads(r.stdout or "{}")
     except json.JSONDecodeError:
@@ -85,7 +87,7 @@ def prompt(p, text):
 
 def pass_tests(p):
     return _hook(p, "PostToolUse", tool_name="Bash", tool_input={"command": "pytest -q"},
-                 tool_response={"stdout": "", "stderr": "", "interrupted": False})
+                 tool_response={"stdout": "3 passed in 0.02s", "stderr": "", "interrupted": False})
 
 
 def pre(p, tool, tool_input):

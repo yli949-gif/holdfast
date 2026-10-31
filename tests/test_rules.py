@@ -84,7 +84,7 @@ class TestScopeMatches:
         assert s.matches(Effect("push", "origin/main", kind="branch")) is True
         assert s.matches(Effect("push", "upstream/main", kind="branch")) is True
         assert s.matches(Effect("push", "origin/feat", kind="branch")) is False
-        assert s.matches(Effect("force_push", "origin/HEAD", kind="branch")) is False
+        assert s.matches(Effect("force_push", "origin/HEAD", kind="branch")) is None   # unresolved ref: could be main
 
     def test_branches_only_match_branch_kind(self):
         s = Scope(branches=["main"])

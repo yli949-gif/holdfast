@@ -6,8 +6,8 @@ import os
 import re
 import time
 
-from .effects import Effect, UNKNOWN, effect_from_tool
-from .rules import Rule, extract_rules
+from .effects import Effect, EVERYTHING, UNKNOWN, action_matches, effect_from_tool
+from .rules import Rule, extract_rules, has_constraint_cue
 
 # an affirmation word must end at a word boundary ("yes, push it" is a yes; "yesterday's build broke" is not)
 AFFIRM = re.compile(r"^\s*(?:yes|y|yep|yeah|yup|sure|ok|okay|confirm(?:ed)?|approved?|go ahead|proceed|do it|go for it|affirmative|please do|i confirm)\b(?:[\s,.!:;-].*)?$", re.I | re.S)
@@ -66,9 +66,16 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
     for rule in rules:
         for e in effects:
             m = rule.matches(e)
+            if m is False and e.action == "exec_opaque" and not e.certain:
+                # an opaque execution (script file, unreadable make/npm target, decoded blob, eval of a variable)
+                # could perform any action: it matches every active rule as *uncertain*
+                m = None
             if m is False:
                 continue
-            uncertain = (m is None) or (not e.certain)
+            # an effect derived heuristically but with a concrete, in-scope target (os.remove('x'), heredoc writing
+            # src/core/util.py) is treated as certain: the target is known, only the mechanism was indirect
+            concrete = e.target not in (UNKNOWN, EVERYTHING) and "*" not in e.target and m is True
+            uncertain = (m is None) or (not e.certain and not concrete)
             cand: Decision | None = None
             if uncertain:
                 pol = cfg.opaque_policy
@@ -95,6 +102,8 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
                     rule.kind = "confirm"  # fallthrough semantics
             if rule.kind == "confirm" and not uncertain and cand is None:
                 grant = state.get("confirmations", {}).get(rule.id)
+                if grant and not grant.get("consumed") and grant.get("target") and not _target_covers(grant["target"], e.target):
+                    grant = None   # user confirmed a different target ("go ahead and delete build/") — does not cover this one
                 if grant and (grant.get("mode") == "always" or not grant.get("consumed")):
                     if grant.get("mode") != "always":
                         grant["consumed"] = True
@@ -150,11 +159,44 @@ def register_rules(state: dict, new_rules: list[Rule]) -> list[Rule]:
     return added
 
 
+def _target_covers(granted: str, target: str) -> bool:
+    """Does a confirmation granted for `granted` cover an effect on `target`? (same path or inside the granted dir)"""
+    g = granted.strip("/").lower()
+    t = target.strip("/").lower()
+    return t == g or t.startswith(g + "/") or t.endswith("/" + g) or ("/" + g + "/") in ("/" + t + "/")
+
+
+# explicit go-ahead for an action class that is under a confirm rule: "yes, delete build/", "go ahead and push"
+_GOAHEAD = re.compile(r"\b(?:go ahead(?: and)?|yes,?(?: please)?|please|ok(?:ay)?,?|sure,?|you can|feel free to|approved?(?: to)?|confirmed?,?)\s+"
+                      r"(?:(?:and|to)\s+)?(delete|remove|rm|wipe|drop|push|force[- ]?push|install|deploy|commit|run|modify|edit|change)\b"
+                      r"(?:\s+(?:the\s+|it\s+|them\s+|those\s+|that\s+)?(?:files?\s+|dirs?\s+|directory\s+|folders?\s+)?(?:under\s+|in\s+)?([`\"']?[\w./*~-]+[`\"']?))?", re.I)
+_VERB_ACTION = {"delete": "delete", "remove": "delete", "rm": "delete", "wipe": "delete", "drop": "delete", "push": "push",
+                "force push": "force_push", "force-push": "force_push", "forcepush": "force_push", "install": "install",
+                "deploy": "deploy", "commit": "commit", "run": "run", "modify": "modify", "edit": "modify", "change": "modify"}
+_NOISE_TARGETS = {"it", "them", "that", "those", "this", "anything", "everything", "the", "a", "now", "please", "yes"}
+
+
+def _expire_holds(state: dict, prompt: str) -> list[str]:
+    """Temporary holds ("don't change anything yet") lapse at the next user turn that asks for work."""
+    from .rules import extract_rules
+    new_hold = any(r.expires == "next_turn" for r in extract_rules(prompt))
+    if new_hold or AFFIRM.match(prompt.strip()) or NEGATE.match(prompt.strip()) or len(prompt.split()) < 3:
+        return []
+    expired = []
+    for r in state.get("rules", []):
+        if r.get("active", True) and r.get("expires") == "next_turn" and r.get("created_turn", 0) < state["turn"]:
+            r["active"] = False
+            r["expired_turn"] = state["turn"]
+            expired.append(r["id"])
+    return expired
+
+
 def handle_prompt(prompt: str, state: dict, cfg: Config) -> dict:
     """UserPromptSubmit: extract constraints, resolve pending confirmations, handle holdfast: commands."""
     state["turn"] = state.get("turn", 0) + 1
-    out = {"added": [], "granted": None, "denied": None, "dropped": [], "listed": False}
+    out = {"added": [], "granted": None, "denied": None, "dropped": [], "listed": False, "expired": [], "goahead": []}
     p = prompt.strip()
+    out["expired"] = _expire_holds(state, p)
 
     for m in DROP.finditer(p):
         rid = m.group(1)
@@ -175,8 +217,22 @@ def handle_prompt(prompt: str, state: dict, cfg: Config) -> dict:
             out["denied"] = pending
             state["pending_confirm"] = None
 
+    # proactive grants: the user explicitly tells the agent to perform a confirm-guarded action
+    for m in _GOAHEAD.finditer(p):
+        act = _VERB_ACTION.get(m.group(1).lower().replace("-", " "), None)
+        if not act:
+            continue
+        tgt = (m.group(2) or "").strip("`\"' ")
+        if tgt.lower() in _NOISE_TARGETS:
+            tgt = ""
+        for r in state.get("rules", []):
+            if r.get("active", True) and r.get("kind") == "confirm" and action_matches(r["action"], act):
+                state.setdefault("confirmations", {})[r["id"]] = {"granted_at": time.time(), "consumed": False, "mode": "once",
+                                                                  "turn": state["turn"], "target": tgt, "via": "goahead"}
+                out["goahead"].append({"rule_id": r["id"], "action": act, "target": tgt})
+
     rules = extract_rules(p, source="user", turn=state["turn"])
-    if cfg.llm_extract and not rules and not AFFIRM.match(p) and len(p) > 15:
+    if cfg.llm_extract and not rules and not AFFIRM.match(p) and len(p) > 15 and has_constraint_cue(p):
         from .rules import extract_rules_llm
         rules = extract_rules_llm(p, turn=state["turn"])
     out["added"] = register_rules(state, rules)

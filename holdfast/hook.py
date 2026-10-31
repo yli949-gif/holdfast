@@ -76,6 +76,10 @@ def run(event: str, payload: dict, cfg: Config | None = None) -> dict | None:
             msgs.append(f"Holdfast: user declined confirmation for rule {res['denied']['rule_id']}; do not retry that action.")
         if res["dropped"]:
             msgs.append("Holdfast: dropped rule(s) " + ", ".join(res["dropped"]))
+        if res.get("expired"):
+            msgs.append("Holdfast: temporary hold(s) " + ", ".join(res["expired"]) + " have lapsed now that you asked for work; standing constraints remain in force.")
+        for g in res.get("goahead", []):
+            msgs.append(f"Holdfast: your go-ahead for {g['action']}{(' on ' + g['target']) if g['target'] else ''} is recorded as a one-time confirmation under rule {g['rule_id']}.")
         if res["listed"] and rules_ctx:
             msgs.append(rules_ctx)
         store.audit({"event": event, "added": [r.id for r in res["added"]], "granted": bool(res["granted"]), "turn": st["turn"]})
@@ -108,7 +112,7 @@ def run(event: str, payload: dict, cfg: Config | None = None) -> dict | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = argv or sys.argv[1:]
+    argv = sys.argv[1:] if argv is None else argv
     event = argv[0] if argv else ""
     raw = sys.stdin.read()
     try:

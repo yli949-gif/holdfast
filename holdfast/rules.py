@@ -13,6 +13,8 @@ from typing import Optional
 from .effects import Effect, EVERYTHING, UNKNOWN, action_matches
 
 KINDS = ("forbid", "confirm", "require_before", "freeze")
+# "prod" must be a whole path segment / token (prod/, .env.production, k8s-production) — not a substring of product.py
+PROD_PATTERN = r"(?:^|[/._\-\s=:])prod(?:uction)?(?:[/.\-\s:]|$)"
 EXPIRES = ("", "next_turn")   # "" = standing rule; "next_turn" = temporary hold, lapses at the next user prompt that asks for work
 
 
@@ -39,12 +41,15 @@ class Scope:
             return self._matches_exclude(e)
         if self.command and re.search(self.command, e.detail or e.target, re.I):
             return True
-        if self.pattern and e.target not in (UNKNOWN,) and re.search(self.pattern, e.target, re.I):
+        if self.pattern and e.target not in (UNKNOWN,) and re.search(_token_regex(self.pattern), e.target, re.I):
             return True
         if self.branches and e.kind == "branch":
             for b in self.branches:
                 if fnmatch.fnmatch(e.target, b) or fnmatch.fnmatch(e.target, "*/" + b):
                     return True
+            # wildcard / unresolved refs (git push --all, --mirror, origin/HEAD) could include the protected branch
+            if "*" in e.target or e.target.endswith("/HEAD") or e.target in (UNKNOWN, EVERYTHING):
+                return None
             return False
         if self.paths and e.kind in ("path", "opaque"):
             if e.target == EVERYTHING:
@@ -75,6 +80,17 @@ class Scope:
         if self.paths:
             return any(_path_in_scope(t, g) for g in self.paths)
         return True
+
+
+_META = re.compile(r"[\\^$.|?*+()\[\]{}]")
+
+
+def _token_regex(pattern: str) -> str:
+    """A plain word pattern ("prod", "staging") matches whole path segments / tokens only, so that `product.py`
+    and `reproduce_bug.py` are not "prod". Anything with regex metacharacters is used verbatim."""
+    if _META.search(pattern):
+        return pattern
+    return r"(?:^|[/._\-\s=:])" + re.escape(pattern) + r"(?:[/.\-\s:]|$)"
 
 
 def _path_in_scope(target: str, glob: str, parents: bool = True) -> bool:
@@ -492,7 +508,7 @@ def _action_rules(ctx: _Ctx, kind: str, action: str, rest: str, frag: str, expir
     if action == "deploy":
         if _PROD.search(rest):
             if kind == "confirm":
-                ctx.add(kind, "deploy", Scope(pattern=r"prod"), frag=frag, expires=expires)
+                ctx.add(kind, "deploy", Scope(pattern=PROD_PATTERN), frag=frag, expires=expires)
                 return True
             return _prod_rules(ctx, kind, frag, expires)
         ctx.add(kind, "deploy", Scope(), frag=frag, expires=expires)
@@ -530,8 +546,8 @@ def _action_rules(ctx: _Ctx, kind: str, action: str, rest: str, frag: str, expir
 
 
 def _prod_rules(ctx: _Ctx, kind: str, frag: str, expires: str = "") -> bool:
-    ctx.add(kind, "modify", Scope(pattern=r"prod"), frag=frag, expires=expires)
-    ctx.add(kind, "deploy", Scope(pattern=r"prod"), frag=frag, expires=expires)
+    ctx.add(kind, "modify", Scope(pattern=PROD_PATTERN), frag=frag, expires=expires)
+    ctx.add(kind, "deploy", Scope(pattern=PROD_PATTERN), frag=frag, expires=expires)
     ctx.add(kind, "run", Scope(command=r"\bprod(uction)?\b"), frag=frag, expires=expires)
     return True
 

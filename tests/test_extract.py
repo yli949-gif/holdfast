@@ -2,7 +2,7 @@
 import pytest
 
 from holdfast.effects import Effect, EVERYTHING, UNKNOWN
-from holdfast.rules import Rule, Scope, _PATH_ALIASES, extract_rules, extract_rules_llm, has_constraint_cue, parse_llm_rules
+from holdfast.rules import PROD_PATTERN, Rule, Scope, _PATH_ALIASES, extract_rules, extract_rules_llm, has_constraint_cue, parse_llm_rules
 
 TESTS_GLOBS = _PATH_ALIASES["the tests"]
 
@@ -128,7 +128,7 @@ class TestForbidGitInstallNetwork:
     def test_prod(self, text):
         rules = extract_rules(text)
         assert {(r.kind, r.action) for r in rules} == {("forbid", "modify"), ("forbid", "deploy"), ("forbid", "run")}
-        assert all(r.scope.pattern == "prod" or r.scope.command for r in rules)
+        assert all(r.scope.pattern == PROD_PATTERN or r.scope.command for r in rules)
 
 
 # ---------------------------------------------------------------- confirm-before
@@ -169,7 +169,7 @@ class TestConfirm:
         r = one("Ask before deploying")
         assert (r.kind, r.action) == ("confirm", "deploy") and r.scope.is_universal()
         r = one("Check with me before deploying to production")
-        assert (r.kind, r.action, r.scope.pattern) == ("confirm", "deploy", "prod")
+        assert (r.kind, r.action, r.scope.pattern) == ("confirm", "deploy", PROD_PATTERN)
 
 
 # ---------------------------------------------------------------- require_before tests_pass

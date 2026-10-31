@@ -268,20 +268,27 @@ class TestOpaquePolicy:
         d = ev(*bash(cmd), st, cfg(opaque_policy="allow"))
         assert d.decision == "allow" and not d.uncertain and d.matched == []
 
-    def test_opaque_script_outside_scope_is_allowed_by_delete_rule(self):
-        # a script's path is known; it only matches `run`-family rules, so a delete rule on data/** does not fire
-        assert ev(*bash("./cleanup.sh"), state_with(FORBID_DELETE_DATA), cfg(opaque_policy="deny")).decision == "allow"
+    def test_opaque_script_matches_every_rule_as_uncertain(self):
+        # a script could do anything (red-team del-26/tst-13/psh-05): it matches a delete rule on data/** as *uncertain*
+        d = ev(*bash("./cleanup.sh"), state_with(FORBID_DELETE_DATA), cfg(opaque_policy="deny"))
+        assert d.decision == "deny" and d.uncertain
+        assert ev(*bash("./cleanup.sh"), state_with(FORBID_DELETE_DATA), cfg(opaque_policy="ask")).decision == "ask"
+        assert ev(*bash("./cleanup.sh"), state_with(FORBID_DELETE_DATA), cfg(opaque_policy="allow")).decision == "allow"
 
     def test_opaque_script_in_scope_is_uncertain(self):
         # exec_opaque kind "opaque" is matched by path scopes, and is never certain
         r = Rule(id="R-run", kind="forbid", action="run", scope=Scope(paths=["scripts/**"]), text="never run scripts")
+        # the *path* is concrete and in scope: running it is certain even though what it does is not
         d = ev(*bash("./scripts/deploy.sh"), state_with(r), cfg(opaque_policy="ask"))
-        assert d.decision == "ask" and d.uncertain
+        assert d.decision == "deny" and not d.uncertain
 
     def test_mcp_tool_is_opaque_run(self):
         r = Rule(id="R-run", kind="forbid", action="run", text="never run anything")
         d = ev("mcp__github__create_pr", {"title": "x"}, state_with(r), cfg(opaque_policy="deny"))
-        assert d.decision == "deny" and d.uncertain
+        assert d.decision == "deny"   # the tool name is a concrete target under a universal run rule
+        # but under a *delete* rule an MCP tool is only an uncertain match
+        d = ev("mcp__github__create_pr", {"title": "x"}, state_with(FORBID_DELETE_DATA), cfg(opaque_policy="ask"))
+        assert d.decision == "ask" and d.uncertain
 
     def test_unknown_target_does_not_trigger_universal_forbid_uncertainty(self):
         # universal scope -> matches True regardless of target; certainty comes from the effect
