@@ -11,6 +11,9 @@ Conditions (what carries the constraint):
   holdfast           constraint in the prompt AND holdfast hooks installed (enforce + context re-injection)
   holdfast-noinject  as holdfast with HOLDFAST_INJECT=0 (mechanical enforcement only, no re-anchoring text)
   holdfast-observe   as holdfast with HOLDFAST_ENFORCE=0 (detect + log, never block -> what it WOULD block)
+  holdfast-rule      ENFORCEMENT ONLY: the constraint is NOT in the prompt (the "none" prompt) and NOT injected;
+                     it exists only as a standing rule in .holdfast/rules.json (`holdfast rules add`) — the end
+                     state of a constraint that has completely left the model's context
 
 Variants (how the session is driven):
   base        one `claude -p` call
@@ -51,10 +54,10 @@ HOOK_PY = REPO_ROOT / "holdfast" / "hook.py"
 LOGGER_PY = HERE / "logger_hook.py"
 RUNS_ROOT = REPO_ROOT / "evals" / "runs"
 
-CONDITIONS = ["none", "prompt", "claudemd", "holdfast", "holdfast-noinject", "holdfast-observe"]
+CONDITIONS = ["none", "prompt", "claudemd", "holdfast", "holdfast-noinject", "holdfast-observe", "holdfast-rule"]
 VARIANTS = ["base", "compact", "midsession"]
 CONSTRAINT_IN_PROMPT = {"prompt", "holdfast", "holdfast-noinject", "holdfast-observe"}
-HOLDFAST_CONDS = {"holdfast", "holdfast-noinject", "holdfast-observe"}
+HOLDFAST_CONDS = {"holdfast", "holdfast-noinject", "holdfast-observe", "holdfast-rule"}
 LOGGER_EVENTS = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "SessionStart",
                  "PreCompact", "PostCompact", "SubagentStart", "Stop"]
 
@@ -89,6 +92,8 @@ def build_settings(run_dir: Path, cond: str, python: str) -> dict:
         env = {"HOLDFAST_DIR": str(run_dir / ".holdfast"),
                "HOLDFAST_ENFORCE": "0" if cond == "holdfast-observe" else "1",
                "HOLDFAST_INJECT": "0" if cond == "holdfast-noinject" else "1"}
+        prefix = "env " + " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items()) + " "
+        env["HOLDFAST_INJECT"] = "0" if cond in ("holdfast-noinject", "holdfast-rule") else env["HOLDFAST_INJECT"]
         prefix = "env " + " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items()) + " "
         for ev, blocks in hooks_config(python=python, hook_py=str(HOOK_PY))["hooks"].items():
             for b in blocks:
@@ -153,7 +158,14 @@ class Run:
         if self.cond in HOLDFAST_CONDS:
             self.env.update({"HOLDFAST_DIR": str(self.run_dir / ".holdfast"),
                              "HOLDFAST_ENFORCE": "0" if self.cond == "holdfast-observe" else "1",
-                             "HOLDFAST_INJECT": "0" if self.cond == "holdfast-noinject" else "1"})
+                             "HOLDFAST_INJECT": "0" if self.cond in ("holdfast-noinject", "holdfast-rule") else "1"})
+        if self.cond == "holdfast-rule":
+            from holdfast.rules import extract_rules
+            rules = [r.as_dict() for r in extract_rules(self.task["constraint"], source="config")]
+            if not rules:
+                raise RuntimeError(f"holdfast-rule: extractor produced no rule for {self.task['constraint']!r}")
+            (self.run_dir / ".holdfast" / "rules.json").write_text(json.dumps({"rules": rules}, indent=1))
+            self.meta["standing_rules"] = rules
         if self.variant == "compact":
             self.env.update(COMPACT_ENV)
         if fx.get("venv"):
