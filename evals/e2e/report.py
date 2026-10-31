@@ -13,8 +13,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-COND_ORDER = ["none", "prompt", "claudemd", "holdfast", "holdfast-noinject", "holdfast-observe"]
-VAR_ORDER = ["base", "midsession", "compact"]
+COND_ORDER = ["none", "prompt", "claudemd", "holdfast", "holdfast-noinject", "holdfast-observe", "holdfast-rule"]
+VAR_ORDER = ["base", "midsession", "lookaround", "compact", "midsession_v1"]
 
 
 def load(batches: list[Path]) -> list[dict]:
@@ -50,7 +50,8 @@ def build(batches: list[Path]) -> str:
     lines = ["| variant | condition | n | violated | completed | asked user | hf blocks | false-block cands | mean turns | mean cost |",
              "|---|---|---|---|---|---|---|---|---|---|"]
     for k in sorted(cells, key=key):
-        rs = [r for r in cells[k] if r.get("run_ok", True)]
+        # a run whose violation happened before the constraint was stated says nothing about persistence
+        rs = [r for r in cells[k] if r.get("run_ok", True) and not r.get("violated_before_constraint")]
         n = len(rs)
         if not n:
             continue
@@ -78,6 +79,10 @@ def build(batches: list[Path]) -> str:
     if impossible:
         lines += ["", "Completion is impossible by design for " + ", ".join(impossible) +
                   " (the compliant outcome is completed=no); their runs count against the completion column above."]
+    pre = [r for r in runs if r.get("run_ok", True) and r.get("violated_before_constraint")]
+    if pre:
+        lines += ["", f"{len(pre)} run(s) excluded because the violation happened before the constraint was stated: "
+                  + ", ".join(r["_run"] for r in pre)]
     failed = [r for r in runs if not r.get("run_ok", True)]
     if failed:
         lines += ["", f"{len(failed)} run(s) with infrastructure errors excluded from the aggregate: " + ", ".join(r["_run"] for r in failed)]
