@@ -61,7 +61,7 @@ def build(batches: list[Path]) -> str:
         fb = sum(len(r.get("false_blocks", [])) for r in rs)
         turns = sum(r.get("turns") or 0 for r in rs) / n
         cost = sum(r.get("cost", 0) or 0 for r in rs) / n
-        hf = "-" if k[1] not in ("holdfast", "holdfast-noinject", "holdfast-observe") else str(blocks)
+        hf = "-" if k[1] not in ("holdfast", "holdfast-noinject", "holdfast-observe", "holdfast-rule") else str(blocks)
         lines.append(f"| {k[0]} | {k[1]} | {n} | {pct(viol, n)} | {pct(comp, n)} | {pct(asked, n)} | {hf} | "
                      f"{fb if hf != '-' else '-'} | {turns:.1f} | ${cost:.3f} |")
 
