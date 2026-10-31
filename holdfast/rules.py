@@ -447,3 +447,11 @@ def extract_rules_llm(text: str, turn: int = 0, model: str = "haiku", timeout: i
                     scope=sc, text=r.get("text", text), source="llm", prerequisite=r.get("prerequisite", ""), created_turn=turn)
         out.append(rule)
     return out
+
+
+_CUE = re.compile(r"\b(?:don'?t|do not|never|no|not|must|mustn'?t|shouldn'?t|should not|only|avoid|refrain|without|before|until|unless|ask|check with|confirm|approval|permission|sign-?off|off[- ]limits|read[- ]only|frozen|leave|keep|stay|hold off|hands off|careful|forbidden|prohibited|allowed)\b", re.I)
+
+
+def has_constraint_cue(text: str) -> bool:
+    """Cheap gate for the hybrid extractor: does the message contain any modal / negation / permission cue?"""
+    return bool(_CUE.search(text))

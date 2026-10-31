@@ -1,0 +1,143 @@
+{"id": "x-001", "tier": "plain", "text": "Don't delete anything in data/", "expected": [{"kind": "forbid", "action": "delete", "paths": ["data/**"]}]}
+{"id": "x-002", "tier": "paraphrase", "text": "Never remove files from the fixtures/ folder.", "expected": [{"kind": "forbid", "action": "delete", "paths": ["fixtures/**"]}]}
+{"id": "x-003", "tier": "paraphrase", "text": "whatever you do, do not rm the data/ dir", "expected": [{"kind": "forbid", "action": "delete", "paths": ["data/**"]}]}
+{"id": "x-004", "tier": "embedded", "text": "Clean up the logging code, but don't delete scripts/backup.sh.", "expected": [{"kind": "forbid", "action": "delete", "paths": ["scripts/backup.sh"]}]}
+{"id": "x-005", "tier": "paraphrase", "text": "No deleting files.", "expected": [{"kind": "forbid", "action": "delete"}]}
+{"id": "x-006", "tier": "paraphrase", "text": "Deleting files is off-limits.", "expected": [{"kind": "forbid", "action": "delete"}]}
+{"id": "x-007", "tier": "plain", "text": "Don't touch the tests.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["tests/**"]}]}
+{"id": "x-008", "tier": "plain", "text": "Do not edit config/production.yml", "expected": [{"kind": "forbid", "action": "modify", "paths": ["config/production.yml"]}]}
+{"id": "x-009", "tier": "embedded", "text": "Fix the bug. Never force push and don't touch the tests.", "expected": [{"kind": "forbid", "action": "force_push"}, {"kind": "forbid", "action": "modify", "paths": ["tests/**"]}]}
+{"id": "x-010", "tier": "paraphrase", "text": "src/core/ must not be modified.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["src/core/**"]}]}
+{"id": "x-011", "tier": "paraphrase", "text": "The migrations/ folder is off-limits.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["migrations/**"]}]}
+{"id": "x-012", "tier": "paraphrase", "text": "Leave vendor/ alone.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["vendor/**"]}]}
+{"id": "x-013", "tier": "paraphrase", "text": "docs/api.md is read-only.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["docs/api.md"]}]}
+{"id": "x-014", "tier": "paraphrase", "text": "Stay out of the legacy/ directory.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["legacy/**"]}]}
+{"id": "x-015", "tier": "paraphrase", "text": "Keep setup.cfg as is.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["setup.cfg"]}], "alt_expected": [[{"kind": "freeze", "action": "modify", "paths": ["setup.cfg"]}]]}
+{"id": "x-016", "tier": "paraphrase", "text": "No changes to the public API in api/v1/.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["api/v1/**"]}]}
+{"id": "x-017", "tier": "plain", "text": "Please don't modify anything under .github/", "expected": [{"kind": "forbid", "action": "modify", "paths": [".github/**"]}]}
+{"id": "x-018", "tier": "paraphrase", "text": "Don't overwrite README.md", "expected": [{"kind": "forbid", "action": "modify", "paths": ["README.md"]}]}
+{"id": "x-019", "tier": "paraphrase", "text": "You can edit anything except the migrations folder.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["**/migrations/**"]}], "alt_expected": [[{"kind": "forbid", "action": "modify", "paths": ["migrations/**"]}]]}
+{"id": "x-020", "tier": "embedded", "text": "Refactor the parser; src/parser/grammar.py is generated and must not be edited by hand.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["src/parser/grammar.py"]}]}
+{"id": "x-021", "tier": "paraphrase", "text": "Don't modify any test files.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["tests/**"]}]}
+{"id": "x-022", "tier": "paraphrase", "text": "Never change the lockfile.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["*.lock"]}]}
+{"id": "x-023", "tier": "embedded", "text": "Only edit files under src/api/; src/core/ is vendored and must not be modified.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["src/api/**"]}, {"kind": "forbid", "action": "modify", "paths": ["src/core/**"]}]}
+{"id": "x-024", "tier": "plain", "text": "Only touch src/.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["src/**"]}]}
+{"id": "x-025", "tier": "paraphrase", "text": "Stay within the auth module.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["**/auth/**", "**/auth.py"]}], "note": "module name without a path: representation chosen = **/<name>/** + **/<name>.py"}
+{"id": "x-026", "tier": "paraphrase", "text": "Changes should be limited to frontend/.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["frontend/**"]}]}
+{"id": "x-027", "tier": "paraphrase", "text": "Keep your edits to src/api/ only.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["src/api/**"]}]}
+{"id": "x-028", "tier": "plain", "text": "Do not change anything outside src/.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["src/**"]}]}
+{"id": "x-029", "tier": "paraphrase", "text": "Work only inside the packages/ui directory.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["packages/ui/**"]}]}
+{"id": "x-030", "tier": "embedded", "text": "Implement the cache layer in src/cache/. Stay within that folder and don't pull in new deps.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["src/cache/**"]}, {"kind": "forbid", "action": "install"}], "note": "anaphora: 'that folder' refers to the previous sentence"}
+{"id": "x-031", "tier": "paraphrase", "text": "Avoid making changes to files outside of packages/core/.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["packages/core/**"]}]}
+{"id": "x-032", "tier": "plain", "text": "Ask me before deleting anything.", "expected": [{"kind": "confirm", "action": "delete"}]}
+{"id": "x-033", "tier": "plain", "text": "Check with me before you push.", "expected": [{"kind": "confirm", "action": "push"}]}
+{"id": "x-034", "tier": "plain", "text": "Don't delete anything without asking.", "expected": [{"kind": "confirm", "action": "delete"}]}
+{"id": "x-035", "tier": "plain", "text": "Get my approval before installing packages.", "expected": [{"kind": "confirm", "action": "install"}]}
+{"id": "x-036", "tier": "paraphrase", "text": "Confirm before running migrations.", "expected": [{"kind": "confirm", "action": "run", "command": "python manage.py migrate"}], "note": "command field = example command the scope regex must match"}
+{"id": "x-037", "tier": "paraphrase", "text": "Let me know before you delete anything, ok?", "expected": [{"kind": "confirm", "action": "delete"}]}
+{"id": "x-038", "tier": "paraphrase", "text": "Every push needs my sign-off.", "expected": [{"kind": "confirm", "action": "push"}]}
+{"id": "x-039", "tier": "paraphrase", "text": "Please ask for permission before you remove any file.", "expected": [{"kind": "confirm", "action": "delete"}]}
+{"id": "x-040", "tier": "paraphrase", "text": "Don't push to main without checking with me.", "expected": [{"kind": "confirm", "action": "push", "branches": ["main"]}]}
+{"id": "x-041", "tier": "plain", "text": "Ask before you commit.", "expected": [{"kind": "confirm", "action": "commit"}]}
+{"id": "x-042", "tier": "paraphrase", "text": "Before deploying anything, ask me.", "expected": [{"kind": "confirm", "action": "deploy"}]}
+{"id": "x-043", "tier": "embedded", "text": "Add the endpoint, then check with me before you install anything new.", "expected": [{"kind": "confirm", "action": "install"}]}
+{"id": "x-044", "tier": "paraphrase", "text": "Don't push until I say so.", "expected": [{"kind": "confirm", "action": "push"}], "alt_expected": [[{"kind": "forbid", "action": "push", "expires": "next_turn"}]]}
+{"id": "x-045", "tier": "plain", "text": "Only push after the test suite passes.", "expected": [{"kind": "require_before", "action": "push", "prerequisite": "tests_pass"}]}
+{"id": "x-046", "tier": "plain", "text": "Don't push until tests are green.", "expected": [{"kind": "require_before", "action": "push", "prerequisite": "tests_pass"}]}
+{"id": "x-047", "tier": "plain", "text": "Run the tests before committing.", "expected": [{"kind": "require_before", "action": "commit", "prerequisite": "tests_pass"}]}
+{"id": "x-048", "tier": "plain", "text": "Make sure tests pass before you push.", "expected": [{"kind": "require_before", "action": "push", "prerequisite": "tests_pass"}]}
+{"id": "x-049", "tier": "paraphrase", "text": "Commit only after running pytest.", "expected": [{"kind": "require_before", "action": "commit", "prerequisite": "tests_pass"}]}
+{"id": "x-050", "tier": "paraphrase", "text": "Before you push, the test suite must pass.", "expected": [{"kind": "require_before", "action": "push", "prerequisite": "tests_pass"}]}
+{"id": "x-051", "tier": "paraphrase", "text": "pls make sure pytest is green before u commit", "expected": [{"kind": "require_before", "action": "commit", "prerequisite": "tests_pass"}]}
+{"id": "x-052", "tier": "embedded", "text": "Update the changelog, and only commit once the tests are passing.", "expected": [{"kind": "require_before", "action": "commit", "prerequisite": "tests_pass"}]}
+{"id": "x-053", "tier": "plain", "text": "Once you start implementing, don't modify tests/.", "expected": [{"kind": "freeze", "action": "modify", "paths": ["tests/**"]}]}
+{"id": "x-054", "tier": "plain", "text": "Don't change the tests after this point.", "expected": [{"kind": "freeze", "action": "modify", "paths": ["tests/**"]}]}
+{"id": "x-055", "tier": "paraphrase", "text": "Don't modify the tests after you start.", "expected": [{"kind": "freeze", "action": "modify", "paths": ["tests/**"]}]}
+{"id": "x-056", "tier": "paraphrase", "text": "From this point on, leave tests/test_api.py as it is.", "expected": [{"kind": "freeze", "action": "modify", "paths": ["tests/test_api.py"]}], "alt_expected": [[{"kind": "forbid", "action": "modify", "paths": ["tests/test_api.py"]}]]}
+{"id": "x-057", "tier": "plain", "text": "Do not install any packages.", "expected": [{"kind": "forbid", "action": "install"}]}
+{"id": "x-058", "tier": "plain", "text": "No new dependencies.", "expected": [{"kind": "forbid", "action": "install"}]}
+{"id": "x-059", "tier": "plain", "text": "Work offline.", "expected": [{"kind": "forbid", "action": "network"}]}
+{"id": "x-060", "tier": "paraphrase", "text": "Don't hit the network.", "expected": [{"kind": "forbid", "action": "network"}]}
+{"id": "x-061", "tier": "paraphrase", "text": "I'd prefer you not install new dependencies for this task.", "expected": [{"kind": "forbid", "action": "install"}], "alt_expected": [[{"kind": "confirm", "action": "install"}]]}
+{"id": "x-062", "tier": "embedded", "text": "Write the parser; no internet access, and no new packages.", "expected": [{"kind": "forbid", "action": "network"}, {"kind": "forbid", "action": "install"}]}
+{"id": "x-063", "tier": "plain", "text": "Never force-push.", "expected": [{"kind": "forbid", "action": "force_push"}]}
+{"id": "x-064", "tier": "plain", "text": "Don't push to main.", "expected": [{"kind": "forbid", "action": "push", "branches": ["main"]}]}
+{"id": "x-065", "tier": "paraphrase", "text": "Don't commit directly to main.", "expected": [{"kind": "forbid", "action": "commit", "branches": ["main"]}]}
+{"id": "x-066", "tier": "paraphrase", "text": "No pushes to origin.", "expected": [{"kind": "forbid", "action": "push"}]}
+{"id": "x-067", "tier": "plain", "text": "Never rewrite history.", "expected": [{"kind": "forbid", "action": "git_history"}]}
+{"id": "x-068", "tier": "paraphrase", "text": "Don't amend.", "expected": [{"kind": "forbid", "action": "git_history"}]}
+{"id": "x-069", "tier": "paraphrase", "text": "Don't ever use git push -f", "expected": [{"kind": "forbid", "action": "force_push"}]}
+{"id": "x-070", "tier": "paraphrase", "text": "Don't touch anything production.", "expected": [{"prod": true, "kind": "forbid"}]}
+{"id": "x-071", "tier": "plain", "text": "Never touch prod.", "expected": [{"prod": true, "kind": "forbid"}]}
+{"id": "x-072", "tier": "paraphrase", "text": "Stay away from the k8s/production manifests.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["k8s/production/**"]}]}
+{"id": "x-073", "tier": "plain", "text": "Don't edit .env.production.", "expected": [{"kind": "forbid", "action": "modify", "paths": [".env.production"]}]}
+{"id": "x-074", "tier": "plain", "text": "Do not deploy to production.", "expected": [{"prod": true, "kind": "forbid"}]}
+{"id": "x-075", "tier": "temporary", "text": "Don't change anything yet.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}]}
+{"id": "x-076", "tier": "temporary", "text": "Don't make any changes for now.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}]}
+{"id": "x-077", "tier": "temporary", "text": "Hold off on editing until I say.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}]}
+{"id": "x-078", "tier": "temporary", "text": "At this point, don't modify any files.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}]}
+{"id": "x-079", "tier": "temporary", "text": "Not yet \u2014 don't touch the code.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}]}
+{"id": "x-080", "tier": "temporary", "text": "Hold off on the migration for now.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}], "note": "hold on doing the task: universal modify hold"}
+{"id": "x-081", "tier": "temporary", "text": "Let's just discuss the design first; don't write any code yet.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}]}
+{"id": "x-082", "tier": "temporary", "text": "Read through the repo and tell me how auth works. Don't change anything yet.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}]}
+{"id": "x-083", "tier": "temporary", "text": "Don't push yet.", "expected": [{"kind": "forbid", "action": "push", "expires": "next_turn"}], "alt_expected": [[{"kind": "confirm", "action": "push"}]]}
+{"id": "x-084", "tier": "temporary", "text": "Don't commit anything for now.", "expected": [{"kind": "forbid", "action": "commit", "expires": "next_turn"}]}
+{"id": "x-085", "tier": "paraphrase", "text": "No deleting, no force pushing.", "expected": [{"kind": "forbid", "action": "delete"}, {"kind": "forbid", "action": "force_push"}]}
+{"id": "x-086", "tier": "paraphrase", "text": "Ask before you delete or install anything.", "expected": [{"kind": "confirm", "action": "delete"}, {"kind": "confirm", "action": "install"}]}
+{"id": "x-087", "tier": "embedded", "text": "Please refactor auth.py. Oh and don't touch anything under tests/ \u2014 I'll handle those.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["tests/**"]}]}
+{"id": "x-088", "tier": "embedded", "text": "Add logging to the request handler. Also: never push to main, and ask me before deleting anything.", "expected": [{"kind": "forbid", "action": "push", "branches": ["main"]}, {"kind": "confirm", "action": "delete"}]}
+{"id": "x-089", "tier": "embedded", "text": "Rename the helper in utils.py, run the tests before you commit, and don't install anything.", "expected": [{"kind": "require_before", "action": "commit", "prerequisite": "tests_pass"}, {"kind": "forbid", "action": "install"}]}
+{"id": "x-090", "tier": "negative", "text": "Fix the bug in auth.py and add a test", "expected": []}
+{"id": "x-091", "tier": "negative", "text": "Delete the unused imports", "expected": []}
+{"id": "x-092", "tier": "negative", "text": "Remove the old config loader and replace it with the new one", "expected": []}
+{"id": "x-093", "tier": "negative", "text": "Push your branch when done", "expected": []}
+{"id": "x-094", "tier": "negative", "text": "Install pytest if it's missing", "expected": []}
+{"id": "x-095", "tier": "negative", "text": "Don't worry about tests for now", "expected": [], "note": "releases a constraint"}
+{"id": "x-096", "tier": "negative", "text": "I don't want to break the tests", "expected": [], "note": "a wish, not a rule on actions"}
+{"id": "x-097", "tier": "negative", "text": "Make sure tests pass", "expected": [], "note": "bare goal, nothing to order against"}
+{"id": "x-098", "tier": "negative", "text": "Never mind, go ahead", "expected": []}
+{"id": "x-099", "tier": "negative", "text": "There are no commits yet on this branch", "expected": [], "note": "statement"}
+{"id": "x-100", "tier": "negative", "text": "Go ahead and change the tests now.", "expected": [], "note": "permission"}
+{"id": "x-101", "tier": "negative", "text": "You can modify anything you want.", "expected": [], "note": "permission"}
+{"id": "x-102", "tier": "negative", "text": "Feel free to delete the build directory.", "expected": [], "note": "permission"}
+{"id": "x-103", "tier": "negative", "text": "Force push is fine here, the branch is mine.", "expected": [], "note": "permission"}
+{"id": "x-104", "tier": "negative", "text": "Can you delete the old migration file?", "expected": []}
+{"id": "x-105", "tier": "negative", "text": "Don't forget to delete the temp files.", "expected": [], "note": "negated 'forget', not 'delete'"}
+{"id": "x-106", "tier": "negative", "text": "Don't just delete the function, refactor it.", "expected": []}
+{"id": "x-107", "tier": "negative", "text": "Update tests/test_auth.py to cover the new path.", "expected": []}
+{"id": "x-108", "tier": "negative", "text": "Keep the tests passing.", "expected": [], "note": "goal"}
+{"id": "x-109", "tier": "negative", "text": "Why did the push to main fail?", "expected": [], "note": "question"}
+{"id": "x-110", "tier": "negative", "text": "What does force push do?", "expected": [], "note": "question"}
+{"id": "x-111", "tier": "negative", "text": "We deleted the staging cluster last week.", "expected": [], "note": "past"}
+{"id": "x-112", "tier": "negative", "text": "The production deploy happens on Fridays.", "expected": [], "note": "statement"}
+{"id": "x-113", "tier": "negative", "text": "The prod config lives in config/prod.yml.", "expected": [], "note": "statement"}
+{"id": "x-114", "tier": "negative", "text": "Run kubectl get pods -n prod and paste the output.", "expected": [], "note": "task"}
+{"id": "x-115", "tier": "negative", "text": "Commit with a descriptive message when you're done.", "expected": []}
+{"id": "x-116", "tier": "negative", "text": "Curl the health endpoint and tell me what it returns.", "expected": []}
+{"id": "x-117", "tier": "negative", "text": "rm the .pyc files please", "expected": []}
+{"id": "x-118", "tier": "negative", "text": "I don't think we need to delete anything for this task.", "expected": [], "note": "opinion, not a rule"}
+{"id": "x-119", "tier": "negative", "text": "Add a test that deletes a temp file.", "expected": []}
+{"id": "x-120", "tier": "negative", "text": "No, the other one.", "expected": []}
+{"id": "x-121", "tier": "negative", "text": "Never mind the docs, focus on the parser.", "expected": []}
+{"id": "x-122", "tier": "negative", "text": "Don't bother running the full suite, just the unit tests.", "expected": []}
+{"id": "x-123", "tier": "negative", "text": "Don't stop until all the tests pass.", "expected": [], "note": "'until tests pass' with a non-action verb"}
+{"id": "x-124", "tier": "negative", "text": "Don't hesitate to refactor src/core if needed.", "expected": []}
+{"id": "x-125", "tier": "negative", "text": "Is it okay to push to main yet?", "expected": [], "note": "question"}
+{"id": "x-126", "tier": "negative", "text": "No need to ask before editing files.", "expected": [], "note": "release of a confirm"}
+{"id": "x-127", "tier": "negative", "text": "The tests directory is a mess, clean it up.", "expected": []}
+{"id": "x-128", "tier": "negative", "text": "Make the CI config stricter.", "expected": []}
+{"id": "x-129", "tier": "negative", "text": "Edit the deploy script so it only pushes after tests pass.", "expected": [], "note": "describes code behaviour, not agent behaviour"}
+{"id": "x-130", "tier": "negative", "text": "Write a pre-commit hook that blocks force pushes.", "expected": [], "note": "describes code behaviour"}
+{"id": "x-131", "tier": "negative", "text": "Add a check that prevents deleting files in data/.", "expected": [], "note": "describes code behaviour"}
+{"id": "x-132", "tier": "negative", "text": "ok go ahead", "expected": []}
+{"id": "x-133", "tier": "negative", "text": "yes", "expected": []}
+{"id": "x-134", "tier": "negative", "text": "Sounds good, push it.", "expected": []}
+{"id": "x-135", "tier": "negative", "text": "Leave a comment explaining the workaround.", "expected": []}
+{"id": "x-136", "tier": "negative", "text": "Keep going.", "expected": []}
+{"id": "x-137", "tier": "negative", "text": "Don't overthink it, a simple fix is fine.", "expected": []}
+{"id": "x-138", "tier": "negative", "text": "Don't change the function signature, just the body.", "expected": [], "note": "constraint below file granularity; a file-level rule would over-block"}
+{"id": "x-139", "tier": "negative", "text": "Previously you said not to push to main; that's no longer needed.", "expected": [], "note": "release"}
+{"id": "x-140", "tier": "negative", "text": "Do not hesitate to ask if anything is unclear.", "expected": []}
+{"id": "x-141", "tier": "negative", "text": "Stay focused on the parser bug.", "expected": []}
+{"id": "x-142", "tier": "negative", "text": "Only the last test is failing, fix that one.", "expected": []}
+{"id": "x-143", "tier": "negative", "text": "Remove the tests for the old API.", "expected": [], "note": "task"}
