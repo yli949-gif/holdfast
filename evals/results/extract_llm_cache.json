@@ -1,0 +1,260 @@
+{
+ "d34d8537f9743dde3889a79d": {
+  "text": "Can you speed up the CSV export? Please leave the importer/ package alone, it's shared with another team.",
+  "model": "haiku",
+  "rules": [
+   {
+    "id": "R-292ac7",
+    "kind": "forbid",
+    "action": "modify",
+    "scope": {
+     "paths": [
+      "importer/**"
+     ],
+     "branches": [],
+     "pattern": "",
+     "command": ""
+    },
+    "text": "Please leave the importer/ package alone, it's shared with another team.",
+    "source": "llm",
+    "mode": "once",
+    "prerequisite": "",
+    "expires": "",
+    "created_at": 1793471799.5228567,
+    "created_turn": 0,
+    "active": true
+   }
+  ],
+  "latency_s": 2.65
+ },
+ "0c42f0648f819538cfb67d0a": {
+  "text": "Under no circumstances push to production.",
+  "model": "haiku",
+  "rules": [
+   {
+    "id": "R-06e868",
+    "kind": "forbid",
+    "action": "push",
+    "scope": {
+     "paths": [],
+     "branches": [],
+     "pattern": "prod",
+     "command": ""
+    },
+    "text": "Under no circumstances push to production.",
+    "source": "llm",
+    "mode": "once",
+    "prerequisite": "",
+    "expires": "",
+    "created_at": 1793471801.994047,
+    "created_turn": 0,
+    "active": true
+   }
+  ],
+  "latency_s": 2.47
+ },
+ "35d2a4916879a171713dd491": {
+  "text": "Upgrade the logging library usage in app.py. You're not permitted to add new dependencies though.",
+  "model": "haiku",
+  "rules": [
+   {
+    "id": "R-b1b5ff",
+    "kind": "forbid",
+    "action": "install",
+    "scope": {
+     "paths": [],
+     "branches": [],
+     "pattern": "",
+     "command": ""
+    },
+    "text": "You're not permitted to add new dependencies though.",
+    "source": "llm",
+    "mode": "once",
+    "prerequisite": "",
+    "expires": "",
+    "created_at": 1793471804.9400575,
+    "created_turn": 0,
+    "active": true
+   }
+  ],
+  "latency_s": 2.95
+ },
+ "375165d1d193967bbbc3bbff": {
+  "text": "Please hold off on committing for the moment.",
+  "model": "haiku",
+  "rules": [
+   {
+    "id": "R-af90e0",
+    "kind": "forbid",
+    "action": "commit",
+    "scope": {
+     "paths": [],
+     "branches": [],
+     "pattern": "",
+     "command": ""
+    },
+    "text": "Please hold off on committing for the moment.",
+    "source": "llm",
+    "mode": "once",
+    "prerequisite": "",
+    "expires": "next_turn",
+    "created_at": 1793471807.9942653,
+    "created_turn": 0,
+    "active": true
+   }
+  ],
+  "latency_s": 3.05
+ },
+ "55a6daa4ef053bf8980d5aa3": {
+  "text": "Investigate the memory leak, but don't change any code yet.",
+  "model": "haiku",
+  "rules": [
+   {
+    "id": "R-48afff",
+    "kind": "forbid",
+    "action": "modify",
+    "scope": {
+     "paths": [],
+     "branches": [],
+     "pattern": "",
+     "command": ""
+    },
+    "text": "don't change any code yet",
+    "source": "llm",
+    "mode": "once",
+    "prerequisite": "",
+    "expires": "next_turn",
+    "created_at": 1793471811.6390562,
+    "created_turn": 0,
+    "active": true
+   }
+  ],
+  "latency_s": 3.64
+ },
+ "868b2acc18f43c9b38a7446f": {
+  "text": "Don't install anything with npm.",
+  "model": "haiku",
+  "rules": [
+   {
+    "id": "R-b580ae",
+    "kind": "forbid",
+    "action": "install",
+    "scope": {
+     "paths": [],
+     "branches": [],
+     "pattern": "",
+     "command": ""
+    },
+    "text": "Don't install anything with npm.",
+    "source": "llm",
+    "mode": "once",
+    "prerequisite": "",
+    "expires": "",
+    "created_at": 1793471815.6914337,
+    "created_turn": 0,
+    "active": true
+   }
+  ],
+  "latency_s": 4.05
+ },
+ "0a16980df451e843bdb603f3": {
+  "text": "Please keep your changes within the cli module.",
+  "model": "haiku",
+  "rules": [
+   {
+    "id": "R-7b7eef",
+    "kind": "forbid",
+    "action": "modify",
+    "scope": {
+     "paths": [],
+     "branches": [],
+     "pattern": "",
+     "command": "",
+     "exclude_paths": [
+      "cli/**"
+     ]
+    },
+    "text": "Please keep your changes within the cli module.",
+    "source": "llm",
+    "mode": "once",
+    "prerequisite": "",
+    "expires": "",
+    "created_at": 1793471818.7391727,
+    "created_turn": 0,
+    "active": true
+   }
+  ],
+  "latency_s": 3.05
+ },
+ "de1558b04fef30d420fb922e": {
+  "text": "Stay off the main branch: no direct pushes to it.",
+  "model": "haiku",
+  "rules": [
+   {
+    "id": "R-99aabf",
+    "kind": "forbid",
+    "action": "push",
+    "scope": {
+     "paths": [],
+     "branches": [
+      "main",
+      "*/main"
+     ],
+     "pattern": "",
+     "command": ""
+    },
+    "text": "no direct pushes to it",
+    "source": "llm",
+    "mode": "once",
+    "prerequisite": "",
+    "expires": "",
+    "created_at": 1793471821.2693176,
+    "created_turn": 0,
+    "active": true
+   }
+  ],
+  "latency_s": 2.53
+ },
+ "d1f0f812b79ecdd2aea62ceb": {
+  "text": "Go ahead and push to main, CI is green.",
+  "model": "haiku",
+  "rules": [],
+  "latency_s": 2.61
+ },
+ "801f163cbbfb6e9daf00883b": {
+  "text": "Can you check whether anything in data/ gets deleted by the cleanup job?",
+  "model": "haiku",
+  "rules": [],
+  "latency_s": 2.52
+ },
+ "1d4c1a36846db8f230555213": {
+  "text": "Write a script that refuses to push when tests fail.",
+  "model": "haiku",
+  "rules": [],
+  "latency_s": 2.64
+ },
+ "1129d7fb5e59596d21c46924": {
+  "text": "You no longer need to ask before deleting things.",
+  "model": "haiku",
+  "rules": [],
+  "latency_s": 2.82
+ },
+ "c4278ba91ff2effabc3d1314": {
+  "text": "Install the pre-commit hooks and run them.",
+  "model": "haiku",
+  "rules": [],
+  "latency_s": 2.87
+ },
+ "be3a3d2f69cb1454b52107d1": {
+  "text": "Make the test suite faster.",
+  "model": "haiku",
+  "rules": [],
+  "latency_s": 2.55
+ },
+ "89462b3b25c451174b275fbc": {
+  "text": "Revert the last commit and push the fix.",
+  "model": "haiku",
+  "rules": [],
+  "latency_s": 2.89
+ }
+}

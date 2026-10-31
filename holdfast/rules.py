@@ -241,6 +241,7 @@ _VERBS = {
     "install": "install", "installation": "install", "instal": "install",
     "run": "run", "runn": "run", "execute": "run", "execut": "run", "execution": "run",
     "rebase": "git_history", "rebas": "git_history", "amend": "git_history",
+    "destructive": "destructive",
 }
 
 
@@ -260,14 +261,14 @@ _NEG = (r"(?:do\s+not|don't|never|mustn't|must\s+not|must\s+never|should\s+not|s
         r"|please\s+don't|please\s+do\s+not|you\s+may\s+not|you\s+can't|you\s+cannot|cannot|can't|not\s+allowed\s+to)")
 _ADV = r"(?:\s+(?:ever|ever\s+again|at\s+all|again|directly|yourself))?"
 _TEMP = re.compile(r"\b(?:yet|for\s+now|for\s+the\s+(?:moment|time\s+being)|at\s+this\s+(?:point|stage)|right\s+now|until\s+further\s+notice"
-                   r"|until\s+i\s+(?:say|tell|give|approve|ok|confirm|get\s+back)\w*(?:\s+(?:so|you|the\s+go[- ]ahead|it))?|hold\s+off)\b", re.I)
-_UNTIL_I_SAY = re.compile(r"\buntil\s+i\s+(?:say|tell|give|approve|ok|confirm)\w*(?:\s+(?:so|you|the\s+go[- ]ahead|it))?\b|\bwithout\s+my\s+go[- ]ahead\b", re.I)
+                   r"|until\s+i(?:'ve|\s+have)?\s+(?:say|said|tell|told|give|given|approve|ok|confirm|review|check|look|sign|get\s+back)\w*(?:\s+(?:so|you|the\s+go[- ]ahead|it|off))?|hold\s+off)\b", re.I)
+_UNTIL_I_SAY = re.compile(r"\buntil\s+i(?:'ve|\s+have)?\s+(?:say|said|tell|told|give|given|approve|ok|confirm|review|check|look|sign)\w*(?:\s+(?:so|you|the\s+go[- ]ahead|it|off))?\b|\bwithout\s+my\s+go[- ]ahead\b", re.I)
 _TEMP_ONLY = re.compile(r"^(?:not\s+yet|for\s+now|at\s+this\s+(?:point|stage)|for\s+the\s+(?:moment|time\s+being)|right\s+now|hold\s+on|wait)$", re.I)
 _WITHOUT_ASKING = re.compile(r"\b(?:without\s+(?:first\s+)?(?:asking|checking|confirming|consulting|talking|my\s+(?:ok|okay|go[- ]ahead)"
                              r"|(?:my\s+|explicit\s+|user\s+|an?\s+)?(?:approval|permission|confirmation|consent|ok|sign-?off))"
                              r"|unless\s+i\s+(?:explicitly\s+)?(?:approve|ok|confirm|allow)\w*)", re.I)
 _TESTS_WORD = r"(?:the\s+|all\s+(?:the\s+)?|our\s+)?(?:unit\s+|full\s+)?(?:tests?|test\s+suite|pytest|suite|ci|checks|the\s+build|build)"
-_PASS = r"(?:pass(?:es|ing)?|are\s+passing|is\s+passing|are\s+green|is\s+green|go\s+green|succeed(?:s)?|come\s+back\s+green|are\s+all\s+green|run\s+and\s+pass|be\s+green|be\s+run\s+and\s+pass)"
+_PASS = r"(?:pass(?:es|ing)?|be\s+passing|are\s+passing|is\s+passing|are\s+green|is\s+green|go\s+green|succeed(?:s)?|come\s+back\s+green|are\s+all\s+green|run\s+and\s+pass|be\s+green|be\s+run\s+and\s+pass)"
 _ORDER_VERBS = {"push": "push", "commit": "commit", "deploy": "deploy", "merg": "push", "ship": "deploy", "releas": "deploy"}
 _UNIVERSAL = re.compile(r"(?:(?:any|all|the|existing|of|other|more|new|extra|single|your|my|our)\s+)*"
                         r"(?:anything(?:\s+else)?|everything|files?|stuff|things?|code|source(?:\s+code)?|source\s+files|codebase|the\s+repo|repo(?:sitory)?|changes?|edits?|projects?)?(?:\s+(?:new|else))?", re.I)
@@ -331,7 +332,7 @@ def _resolve(phrase: str, last_path: Optional[list] = None, module_ok: bool = Tr
             paths.append(m.group(1))
     if paths:
         return _Res("scope", Scope(paths=paths))
-    if re.fullmatch(r"(?:that|this|the\s+same)\s+(?:folder|directory|dir|path|module|package|area)|there|it", low) and last_path:
+    if re.fullmatch(r"(?:that|this|the\s+same)\s+(?:folder|directory|dir|path|module|package|area|file)|there|it|them|those(?:\s+files)?|these(?:\s+files)?", low) and last_path:
         return _Res("scope", Scope(paths=list(last_path)))
     if low in _PATH_ALIASES:
         return _Res("scope", Scope(paths=list(_PATH_ALIASES[low])))
@@ -386,7 +387,11 @@ def _normalise(text: str) -> str:
             (r"\bkeep\s+(?:your\s+)?hands\s+off\b", "hands off"), (r"\bmake\s+sure\s+(?:that\s+)?you\s+(?:don't|do\s+not)\b", "don't"),
             (r"\bnot\s+(?:allowed|permitted)\s+to\b", "not allowed to"),
             (r"\b(?:make|do|perform|create)\s+(?:any\s+|more\s+|further\s+)?(commits?|changes|edits|modifications|pushes|deletions)\b", r"\1"),
-            (r"\bfrom\s+this\s+point\s+(?:on(?:wards?)?|forward)\b", "from now on")]
+            (r"\bfrom\s+this\s+point\s+(?:on(?:wards?)?|forward)\b", "from now on"),
+            (r"\b([Yy])ou're\b", r"\1ou are"), (r"\bhand-(edit|modif|chang|writ)", r"\1"),
+            (r"\b(?:absolutely|strictly|definitely|really|seriously)\s+(no|not|never|don't|do\s+not)\b", r"\1"),
+            (r"\b(?:i\s+need\s+you\s+to|i\s+want\s+you\s+to|i'd\s+like\s+you\s+to)\s+", ""),
+            (r"\b(?:destructive|dangerous)\s+(?:commands?|operations?|actions?)\b", "destructive")]
     for a, b in subs:
         t = re.sub(a, b, t, flags=re.I)
     return t
@@ -398,12 +403,13 @@ def _sentences(t: str) -> list[str]:
     return [p.strip() for p in parts if p and p.strip()]
 
 
-_CLAUSE_CUE = (r"(?:don't|do\s+not|never|no|please|ask|check|confirm|get\s+my|only|stay|leave|keep|make\s+sure|ensure|run\s+the|"
+_CLAUSE_CUE = (r"(?:don't|do\s+not|never|no|please|ask|check|confirm|get\s+my|only|stay|leave|keep|make\s+sure|ensure|run\s+the|you\s+are\s+not|"
                r"avoid|hands\s+off|hold\s+off|not\s+yet|let\s+me\s+know|refrain|you\s+(?:are|re)\s+not|nothing)\b")
 
 
 def _clauses(s: str) -> list[str]:
-    parts = re.split(rf"\s+[—–]\s+|\s[—–]|[—–]\s|\s+-\s+|:\s+|,\s*(?:and|but|or|then)\s+(?={_CLAUSE_CUE})|\s+(?:and|but|or|then)\s+(?={_CLAUSE_CUE})"
+    s = re.sub(r",\s+(?:it'?s|it\s+is|they'?re|they\s+are|since|because|as\s+it)\b[^,;]*$", "", s, flags=re.I)
+    parts = re.split(rf"\s+[—–]\s+|\s[—–]|[—–]\s|\s+-\s+|:\s+|,\s*(?:and|but|or|then|so)\s+(?={_CLAUSE_CUE})|\s+(?:and|but|or|then)\s+(?={_CLAUSE_CUE})"
                      rf"|,\s+(?={_CLAUSE_CUE})|\s+(?:and\s+also|also)\s+", s, flags=re.I)
     out: list[str] = []
     for p in parts:
@@ -471,7 +477,7 @@ def _action_rules(ctx: _Ctx, kind: str, action: str, rest: str, frag: str, expir
             return _prod_rules(ctx, kind, frag, expires)
         # "never commit secrets" / "don't push the .env file" name an object we can't scope: no rule (a universal
         # forbid-commit would block every commit)
-        obj = re.sub(r"^(?:(?:anything|any|all|the|your|my|our|of|these|those|new|code|changes?|commits?|work|it|them|this|that|stuff|things)\b\s*)+", "", _TRAILING.sub("", " " + rest).strip().lower())
+        obj = re.sub(r"^(?:(?:anything|any|all|the|your|my|our|of|these|those|new|code|changes?|commits?|work|it|them|this|that|stuff|things|tags?|branch(?:es)?|release)\b\s*)+", "", _TRAILING.sub("", " " + rest).strip().lower())
         obj = re.sub(r"^(?:yet|for\s+now|until\b.*|without\b.*|unless\b.*|please)$", "", obj).strip(" .,!")
         if obj and not re.fullmatch(r"(?:to|on|into)\s+(?:the\s+)?(?:remote|origin|upstream|github|gitlab)\b.*|(?:yourself|again|ever|at\s+all|here|now|today)", obj):
             return False
@@ -493,6 +499,9 @@ def _action_rules(ctx: _Ctx, kind: str, action: str, rest: str, frag: str, expir
         return True
     if action == "run":
         r = _TRAILING.sub("", rest).strip().lower()
+        if re.match(r"(?:any\s+|a\s+)?destructive\b", r):
+            ctx.add(kind, "destructive", Scope(), frag=frag, expires=expires)
+            return True
         r = re.sub(r"^(?:(?:any|the|a|an|database|db|schema)\s+)+", "", r)
         if _PROD.search(r) and not re.search(r"[/.]", r):
             return _prod_rules(ctx, kind, frag, expires)
@@ -535,8 +544,14 @@ def _exclude_rule(ctx: _Ctx, phrase: str, frag: str) -> bool:
     return True
 
 
+def _bad_subject(subj: str) -> bool:
+    """A predicate subject ("X is off-limits") must be a short noun phrase, not a pronoun or a whole task sentence."""
+    sj = subj.strip().lower()
+    return sj in _PRONOUNS or len(sj.split()) > 7 or ". " in sj or bool(re.match(r"(?:please\s+)?(?:fix|add|upgrade|update|refactor|implement|write|make|run|change|create|rename|move|clean)\b", sj))
+
+
 _PRONOUNS = {"you", "we", "i", "it", "they", "this", "that", "he", "she", "everything", "nothing"}
-_MODV = r"(?:edit|touch|modify|change|write\s+to|work\s+on|work\s+in|alter|update|(?:make\s+)?(?:changes|edits)\s+(?:to|in))"
+_MODV = r"(?:edit|touch|modify|change|write\s+to|work\s+on|work\s+in|alter|update|(?:make\s+)?(?:changes|edits)(?=\s+(?:to|in|under|within|inside)))"
 
 
 def _clause_rules(ctx: _Ctx, c: str, frag: str, temp: bool) -> bool:
@@ -554,7 +569,7 @@ def _clause_rules(ctx: _Ctx, c: str, frag: str, temp: bool) -> bool:
         r"^(?:stay|remain|keep|work)\s+(?:only\s+)?(?:with)?in(?:side)?\s+(.+)$",
         r"^work\s+only\s+(?:with)?in(?:side)?\s+(.+)$",
         r"^(?:keep|limit|restrict|confine)\s+(?:your\s+|all\s+|the\s+)?(?:edits|changes|modifications|work)\s+(?:to|in|within|inside)\s+(.+?)(?:\s+only)?$",
-        r"^(?:your\s+|all\s+|the\s+)?(?:edits|changes|modifications)\s+(?:should|must|need\s+to|have\s+to)\s+(?:be\s+)?(?:limited|restricted|confined|stay|remain|kept)\s+(?:to|in|within|inside)\s+(.+)$",
+        r"^(?:your\s+|all\s+|the\s+)?(?:edits|changes|modifications)\s+(?:are|is|should|must|need\s+to|have\s+to)\s+(?:be\s+)?(?:limited|restricted|confined|stay|remain|kept)\s+(?:to|in|within|inside)\s+(.+)$",
         rf"^(?:{_NEG})\s+(?:{_MODV}|make\s+(?:any\s+)?changes)\s+(?:anything|any\s+files?|files?|code)?\s*outside\s+(?:of\s+)?(.+)$",
         r"^avoid\s+(?:making\s+)?(?:any\s+)?(?:changes|edits)\s+(?:to\s+)?(?:files?\s+|anything\s+)?outside\s+(?:of\s+)?(.+)$",
         r"^nothing\s+outside\s+(?:of\s+)?(.+?)\s+(?:should|may|can|must)\s+(?:be\s+)?(?:change|modifi|edit|touch)\w*$",
@@ -596,7 +611,7 @@ def _clause_rules(ctx: _Ctx, c: str, frag: str, temp: bool) -> bool:
         rf"^(?:only\s+)?(?:(?:{_NEG})\s+)?{ov}(?:\s+\S+){{0,4}}?\s+(?:only\s+)?(?:until|unless|after|once|when|if)\s+(?:all\s+)?{_TESTS_WORD}\s+(?:\w+\s+)?{_PASS}",
         rf"^(?:only\s+)?{ov}(?:\s+\S+){{0,3}}?\s+(?:only\s+)?(?:after|once)\s+(?:running|you(?:'ve|\s+have)?\s+run)\s+{_TESTS_WORD}",
         rf"^(?:always\s+)?(?:run|make\s+sure|ensure|check(?:\s+that)?|verify(?:\s+that)?)\s+{_TESTS_WORD}\s+(?:\w+\s+)?(?:{_PASS}\s+)?(?:before|prior\s+to)\s+(?:you\s+|every\s+|any\s+|each\s+|a\s+)?{ov}",
-        rf"^{_TESTS_WORD}\s+(?:must|should|need\s+to|have\s+to)\s+{_PASS}\s+(?:before|prior\s+to)\s+(?:you\s+|any\s+|every\s+|each\s+)?{ov}",
+        rf"^{_TESTS_WORD}\s+(?:must|should|need\s+to|needs\s+to|have\s+to|has\s+to)\s+{_PASS}\s+(?:before|prior\s+to)\s+(?:you\s+|any\s+|every\s+|each\s+|anything\s+(?:gets?\s+|is\s+)?|code\s+(?:gets?\s+|is\s+)?)?{ov}",
         rf"^before\s+(?:you\s+|any\s+|every\s+|each\s+)?{ov}(?:\s+\S+){{0,3}}?,?\s+{_TESTS_WORD}\s+(?:must|should|need\s+to|have\s+to)\s+{_PASS}",
         rf"^before\s+(?:you\s+|any\s+|every\s+|each\s+)?{ov}(?:\s+\S+){{0,3}}?,?\s+(?:always\s+)?(?:run|make\s+sure|ensure)\s+{_TESTS_WORD}",
         rf"^no\s+{ov}\s+(?:until|unless|before)\s+{_TESTS_WORD}\s+{_PASS}",
@@ -634,7 +649,7 @@ def _clause_rules(ctx: _Ctx, c: str, frag: str, temp: bool) -> bool:
     if m and _verb_action(m.group(1)):
         ctx.add("confirm", _verb_action(m.group(1)), Scope(), frag=frag)
         return True
-    m = re.match(r"^(?:every|any|all|each)?\s*([a-z-]+?)\s+(?:of\s+\w+\s+)?(?:requires?|needs?|must\s+(?:have|get)|has\s+to\s+(?:have|get))\s+(?:my\s+|explicit\s+|user\s+|an?\s+)?(?:confirmation|approval|sign-?off|permission|ok|okay|review)", low)
+    m = re.match(r"^(?:every|any|all|each)?\s*([a-z-]+?)(?:\s+(?:any\s+)?(?:files?|anything|commits?|code|packages?|dependencies|branches))?\s+(?:of\s+\w+\s+)?(?:requires?|needs?|must\s+(?:have|get)|has\s+to\s+(?:have|get))\s+(?:(?:my|explicit|user|an?)\s+)*(?:confirmation|approval|sign-?off|permission|ok|okay|review)", low)
     if m and _verb_action(m.group(1)):
         ctx.add("confirm", _verb_action(m.group(1)), Scope(), frag=frag)
         return True
@@ -646,7 +661,7 @@ def _clause_rules(ctx: _Ctx, c: str, frag: str, temp: bool) -> bool:
         if res.kind == "scope":
             ctx.add("freeze", "modify", res.scope, frag=frag)
             return True
-    m = re.match(rf"^(?:{_NEG})\s+(\w+)\s+(.+?)\s+(?:after|once|when)\s+(?:you|we|the\s+task|work|implementation)\s+(?:start|begin|get\s+going)\w*", low) or \
+    m = re.match(rf"^(?:{_NEG})\s+(\w+)\s+(.+?)\s+(?:after|once|when)\s+(?:you(?:'ve|\s+have)?|we(?:'ve)?|the\s+task|work|implementation)\s+(?:start|began|begun|begin|get\s+going)\w*", low) or \
         re.match(rf"^(?:{_NEG})\s+(\w+)\s+(.+?)\s+(?:after\s+this\s+point|from\s+(?:now|this\s+point|here)\s+on(?:wards?)?|from\s+now|going\s+forward)\b", low)
     if m and _verb_action(m.group(1)) == "modify":
         res = _resolve(cl[m.start(2):m.end(2)], ctx.last_path)
@@ -681,7 +696,7 @@ def _clause_rules(ctx: _Ctx, c: str, frag: str, temp: bool) -> bool:
     m = re.match(r"^(.+?)\s+(?:is|are)\s+(?:\w+\s+and\s+)?(?:must|should|may|can|shall)\s*(?:not|n't|never)\s+be\s+(\w+)", low) or \
         re.match(r"^(.+?)\s+(?:must|should|may|can|shall)\s*(?:not|n't|never)\s+(?:ever\s+)?be\s+(\w+)", low) or \
         re.match(r"^(.+?)\s+(?:is|are)\s+not\s+to\s+be\s+(\w+)", low)
-    if m and m.group(1).strip() in _PRONOUNS:
+    if m and _bad_subject(m.group(1)):
         m = None
     if m:
         subj, verb = cl[m.start(1):m.end(1)], m.group(2)
@@ -695,7 +710,7 @@ def _clause_rules(ctx: _Ctx, c: str, frag: str, temp: bool) -> bool:
                 return _prod_rules(ctx, "forbid", frag, exp)
         return False
     m = re.match(r"^(.+?)\s+(?:must|should|has\s+to|needs\s+to|have\s+to|need\s+to)\s+(?:stay|remain|be\s+left|be\s+kept)\s+(?:as[- ]is|unchanged|untouched|intact|the\s+same|alone|as\s+(?:it\s+is|they\s+are))$", low)
-    if m and m.group(1).strip() not in _PRONOUNS:
+    if m and not _bad_subject(m.group(1)):
         res = _resolve(cl[m.start(1):m.end(1)], ctx.last_path, module_ok=False)
         if res.kind == "scope":
             ctx.add("forbid", "modify", res.scope, frag=frag, expires=exp)
@@ -703,7 +718,7 @@ def _clause_rules(ctx: _Ctx, c: str, frag: str, temp: bool) -> bool:
         return False
     m = re.match(r"^(.+?)\s+(?:is|are)\s+(?:strictly\s+|completely\s+)?(off[- ]limits|read[- ]only|vendored|frozen|locked|sacred|untouchable|not\s+(?:allowed|permitted)|forbidden|prohibited|banned)\b", low) or \
         re.match(r"^(.+?)\s+(?:is|are)\s+\w+\s+and\s+(read[- ]only|off[- ]limits)\b", low)
-    if m and m.group(1).strip() in _PRONOUNS:
+    if m and _bad_subject(m.group(1)):
         m = None
     if m:
         subj = cl[m.start(1):m.end(1)]
@@ -741,6 +756,10 @@ def _clause_rules(ctx: _Ctx, c: str, frag: str, temp: bool) -> bool:
     if re.match(rf"^(?:you\s+)?(?:{_NEG})\s+(?:ever\s+)?(?:rewrite|rebase|amend|squash|alter)(?:\s+(?:any\s+|the\s+|git\s+|existing\s+|published\s+)*(?:history|commits?))?$", low) or \
        re.match(r"^no\s+(?:rebasing|rebases|amending|amends|squashing|squashes|history\s+rewrit\w*|rewriting\s+history)\b", low):
         ctx.add("forbid", "git_history", Scope(), frag=frag, expires=exp)
+        return True
+
+    if temp and re.fullmatch(r"(?:and\s+)?(?:no|zero)\s+(?:edits|changes|modifications|code\s+changes)(?:\s+(?:yet|for\s+now))?", low):
+        ctx.add("forbid", "modify", Scope(), frag=frag, expires="next_turn")
         return True
 
     # ---- "no VERBing [object]" / "no pushes to X" (only at clause start)

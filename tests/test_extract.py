@@ -571,3 +571,35 @@ class TestLLMParsing:
     def test_cli_missing_returns_empty(self, monkeypatch):
         monkeypatch.setenv("PATH", "/nonexistent")
         assert extract_rules_llm("Never force push", timeout=5) == []
+
+
+class TestPostBlindFixes:
+    """Gaps found by the fresh blind set (evals/corpus/constraints_blind.jsonl); see evals/results/extract.md."""
+
+    @pytest.mark.parametrize("text,want", [
+        ("Please leave the importer/ package alone, it's shared with another team.", ("forbid", "modify", ["importer/**"], [], "")),
+        ("Changes are restricted to the docs/ folder.", ("forbid", "modify", [], ["docs/**"], "")),
+        ("Only make edits inside services/payments/.", ("forbid", "modify", [], ["services/payments/**"], "")),
+        ("The generated client in gen/ should not be hand-edited.", ("forbid", "modify", ["gen/**"], [], "")),
+        ("Just analyse for now, no edits.", ("forbid", "modify", [], [], "next_turn")),
+        ("Removing files needs my explicit OK.", ("confirm", "delete", [], [], "")),
+        ("Absolutely no network calls.", ("forbid", "network", [], [], "")),
+        ("pytest has to be green before anything gets committed.", ("require_before", "commit", [], [], "")),
+        ("Before running any destructive command, check with me.", ("confirm", "destructive", [], [], "")),
+        ("I need you to get my sign-off before you merge anything.", ("confirm", "push", [], [], "")),
+        ("Do not push the tag until I've reviewed it.", ("confirm", "push", [], [], "")),
+    ])
+    def test_single(self, text, want):
+        assert [(r.kind, r.action, r.scope.paths, r.scope.exclude_paths, r.expires) for r in extract_rules(text)] == [want]
+
+    def test_task_sentence_is_not_a_predicate_subject(self):
+        rules = extract_rules("Upgrade the logging library usage in app.py. You're not permitted to add new dependencies though.")
+        assert kinds("Upgrade the logging library usage in app.py. You're not permitted to add new dependencies though.") == [("forbid", "install")]
+        assert all(not r.scope.paths for r in rules)
+
+    def test_anaphora_them_and_once_youve_started(self):
+        r = one("Rewrite the tokenizer in src/lexer.py; the tests in tests/lexer/ are the spec, so don't modify them once you've started.")
+        assert (r.kind, r.action, r.scope.paths) == ("freeze", "modify", ["tests/lexer/**"])
+
+    def test_commit_with_unscopable_object_is_dropped(self):
+        assert extract_rules("Never commit secrets.") == []

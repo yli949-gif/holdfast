@@ -1,0 +1,43 @@
+{"id": "b-001", "tier": "embedded", "text": "Can you speed up the CSV export? Please leave the importer/ package alone, it's shared with another team.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["importer/**"]}]}
+{"id": "b-002", "tier": "paraphrase", "text": "The billing/ directory is not to be touched.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["billing/**"]}]}
+{"id": "b-003", "tier": "paraphrase", "text": "Under no circumstances push to production.", "expected": [{"prod": true, "kind": "forbid"}], "alt_expected": [[{"kind": "forbid", "action": "push", "branches": ["production"]}]]}
+{"id": "b-004", "tier": "embedded", "text": "Upgrade the logging library usage in app.py. You're not permitted to add new dependencies though.", "expected": [{"kind": "forbid", "action": "install"}]}
+{"id": "b-005", "tier": "paraphrase", "text": "Please hold off on committing for the moment.", "expected": [{"kind": "forbid", "action": "commit", "expires": "next_turn"}]}
+{"id": "b-006", "tier": "paraphrase", "text": "Changes are restricted to the docs/ folder.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["docs/**"]}]}
+{"id": "b-007", "tier": "plain", "text": "Never delete the .git directory.", "expected": [{"kind": "forbid", "action": "delete", "paths": [".git/**"]}]}
+{"id": "b-008", "tier": "paraphrase", "text": "Before running any destructive command, check with me.", "expected": [{"kind": "confirm", "action": "destructive"}], "note": "'destructive' action exists in ACTION_TREE"}
+{"id": "b-009", "tier": "embedded", "text": "Investigate the memory leak, but don't change any code yet.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}]}
+{"id": "b-010", "tier": "paraphrase", "text": "I need you to get my sign-off before you merge anything.", "expected": [{"kind": "confirm", "action": "push"}]}
+{"id": "b-011", "tier": "paraphrase", "text": "pytest has to be green before anything gets committed.", "expected": [{"kind": "require_before", "action": "commit", "prerequisite": "tests_pass"}]}
+{"id": "b-012", "tier": "paraphrase", "text": "Keep away from the infra/terraform/ directory.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["infra/terraform/**"]}]}
+{"id": "b-013", "tier": "plain", "text": "Don't install anything with npm.", "expected": [{"kind": "forbid", "action": "install"}]}
+{"id": "b-014", "tier": "paraphrase", "text": "Do not push --force under any circumstances.", "expected": [{"kind": "forbid", "action": "force_push"}]}
+{"id": "b-015", "tier": "embedded", "text": "Rewrite the tokenizer in src/lexer.py; the tests in tests/lexer/ are the spec, so don't modify them once you've started.", "expected": [{"kind": "freeze", "action": "modify", "paths": ["tests/lexer/**"]}]}
+{"id": "b-016", "tier": "paraphrase", "text": "Only make edits inside services/payments/.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["services/payments/**"]}]}
+{"id": "b-017", "tier": "paraphrase", "text": "Removing files needs my explicit OK.", "expected": [{"kind": "confirm", "action": "delete"}]}
+{"id": "b-018", "tier": "paraphrase", "text": "Absolutely no network calls.", "expected": [{"kind": "forbid", "action": "network"}]}
+{"id": "b-019", "tier": "temporary", "text": "Just analyse for now, no edits.", "expected": [{"kind": "forbid", "action": "modify", "expires": "next_turn"}]}
+{"id": "b-020", "tier": "paraphrase", "text": "Don't rebase or amend anything.", "expected": [{"kind": "forbid", "action": "git_history"}]}
+{"id": "b-021", "tier": "embedded", "text": "Bump the version in setup.py and tag it. Do not push the tag until I've reviewed it.", "expected": [{"kind": "confirm", "action": "push"}], "alt_expected": [[{"kind": "forbid", "action": "push", "expires": "next_turn"}]]}
+{"id": "b-022", "tier": "paraphrase", "text": "The generated client in gen/ should not be hand-edited.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["gen/**"]}]}
+{"id": "b-023", "tier": "paraphrase", "text": "Run the full test suite before you push anything.", "expected": [{"kind": "require_before", "action": "push", "prerequisite": "tests_pass"}]}
+{"id": "b-024", "tier": "paraphrase", "text": "Please keep your changes within the cli module.", "expected": [{"kind": "forbid", "action": "modify", "exclude_paths": ["**/cli/**", "**/cli.py"]}]}
+{"id": "b-025", "tier": "embedded", "text": "Clean up the warnings. Ask me before you delete any file in assets/.", "expected": [{"kind": "confirm", "action": "delete", "paths": ["assets/**"]}]}
+{"id": "b-026", "tier": "paraphrase", "text": "Stay off the main branch: no direct pushes to it.", "expected": [{"kind": "forbid", "action": "push", "branches": ["main"]}], "note": "anaphora 'it' = main"}
+{"id": "b-027", "tier": "paraphrase", "text": "Do not modify Dockerfile or docker-compose.yml.", "expected": [{"kind": "forbid", "action": "modify", "paths": ["Dockerfile", "docker-compose.yml"]}]}
+{"id": "b-028", "tier": "temporary", "text": "Not now - don't push anything.", "expected": [{"kind": "forbid", "action": "push", "expires": "next_turn"}], "alt_expected": [[{"kind": "forbid", "action": "push"}]]}
+{"id": "b-029", "tier": "negative", "text": "Please delete the stale fixtures in tests/fixtures/old/.", "expected": [], "note": "task"}
+{"id": "b-030", "tier": "negative", "text": "Go ahead and push to main, CI is green.", "expected": [], "note": "permission"}
+{"id": "b-031", "tier": "negative", "text": "Can you check whether anything in data/ gets deleted by the cleanup job?", "expected": [], "note": "question"}
+{"id": "b-032", "tier": "negative", "text": "The README says not to edit generated files; is that still true?", "expected": [], "note": "question about docs"}
+{"id": "b-033", "tier": "negative", "text": "Write a script that refuses to push when tests fail.", "expected": [], "note": "code behaviour"}
+{"id": "b-034", "tier": "negative", "text": "You no longer need to ask before deleting things.", "expected": [], "note": "release"}
+{"id": "b-035", "tier": "negative", "text": "Install the pre-commit hooks and run them.", "expected": [], "note": "task"}
+{"id": "b-036", "tier": "negative", "text": "I deleted the old branch already, don't worry about it.", "expected": [], "note": "statement + release"}
+{"id": "b-037", "tier": "negative", "text": "Make the test suite faster.", "expected": [], "note": "task"}
+{"id": "b-038", "tier": "negative", "text": "Only the parser is broken; the lexer is fine.", "expected": [], "note": "statement"}
+{"id": "b-039", "tier": "negative", "text": "Don't forget to update the changelog.", "expected": [], "note": "reminder, not a prohibition"}
+{"id": "b-040", "tier": "negative", "text": "We never push on Fridays, so let's finish today.", "expected": [], "note": "team habit statement, ambiguous: labelled no-rule"}
+{"id": "b-041", "tier": "negative", "text": "Stop and summarize what you've done so far.", "expected": [], "note": "task"}
+{"id": "b-042", "tier": "negative", "text": "Revert the last commit and push the fix.", "expected": [], "note": "task"}
+{"id": "b-043", "tier": "negative", "text": "If the tests fail, don't panic, just show me the output.", "expected": [], "note": "idiom"}

@@ -1,0 +1,18 @@
+{
+ "pattern": {
+  "stats": {
+   "n": 57,
+   "pos": 33,
+   "exact": 57,
+   "exact_pos": 33,
+   "tp": 39,
+   "pred": 39,
+   "gold": 39,
+   "neg": 24,
+   "exact_neg": 24,
+   "precision": 1.0,
+   "recall": 1.0
+  },
+  "misses": []
+ }
+}

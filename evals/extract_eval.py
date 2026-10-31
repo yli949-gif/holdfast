@@ -251,17 +251,22 @@ def score_v1(path: pathlib.Path, extract) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--corpus", default=str(CORPUS.relative_to(ROOT)), help="labelled v2 corpus (the 60/40 split applies to the main corpus only)")
     ap.add_argument("--split", default="dev", choices=["dev", "heldout", "all"])
     ap.add_argument("--llm", action="store_true", help="also score llm + hybrid")
     ap.add_argument("--llm-limit", type=int, default=15, help="max NEW claude -p calls this run")
-    ap.add_argument("--llm-items", default="", help="comma list of ids to restrict LLM scoring to (default: cached + first N)")
+    ap.add_argument("--llm-sample", type=int, default=0, help="score the LLM on the first N items by sha1(id) rank (a fixed, un-cherry-picked sample)")
     ap.add_argument("--v1", action="store_true")
     ap.add_argument("--show", action="store_true")
     a = ap.parse_args()
 
-    items = [json.loads(l) for l in CORPUS.read_text().splitlines() if l.strip()]
-    items = [it for it in items if a.split == "all" or split_of(it["id"]) == a.split]
-    print(f"corpus={CORPUS.relative_to(ROOT)} split={a.split} n={len(items)} "
+    corpus = ROOT / a.corpus
+    items = [json.loads(l) for l in corpus.read_text().splitlines() if l.strip()]
+    if corpus == CORPUS:
+        items = [it for it in items if a.split == "all" or split_of(it["id"]) == a.split]
+    else:
+        a.split = "all"
+    print(f"corpus={a.corpus} split={a.split} n={len(items)} "
           f"(pos={sum(1 for i in items if i['expected'])}, neg={sum(1 for i in items if not i['expected'])})")
     print(HEADER)
     res = {"pattern": score(items, lambda it: extract_rules(it["text"]))}
@@ -270,7 +275,7 @@ def main():
     if a.llm:
         budget = [a.llm_limit]
         lats = []
-        only = set(a.llm_items.split(",")) if a.llm_items else None
+        only = {it["id"] for it in sorted(items, key=lambda it: _h(it["id"]))[: a.llm_sample]} if a.llm_sample else None
 
         def llm(it):
             if only is not None and it["id"] not in only:
@@ -301,6 +306,9 @@ def main():
             ls = sorted(lats)
             print(f"\nLLM subset n={len(sub)}; latency per call: median {ls[len(ls) // 2]}s, min {ls[0]}s, max {ls[-1]}s; "
                   f"hybrid would call the LLM on {n_llm_hybrid}/{len(sub)} items")
+
+    out = ROOT / "evals/results" / f"extract_{pathlib.Path(a.corpus).stem}_{a.split}.json"
+    out.write_text(json.dumps({k: v for k, v in res.items()}, indent=1, default=str))
 
     if a.v1:
         print("\nv1 corpora, (kind, action) level only:")
