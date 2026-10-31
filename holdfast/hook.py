@@ -2,8 +2,8 @@
 
 Usage (from hooks config):  python3 /path/to/holdfast/hook.py <event>
 Reads the hook JSON on stdin, writes a hook JSON response on stdout.
-Must be fast and must never crash the session: any internal error → exit 0 (fail-open)
-unless HOLDFAST_FAIL_CLOSED=1, in which case internal errors deny the tool call.
+Must be fast and must never crash the session. An internal error during PreToolUse denies the call
+(fail-closed, HOLDFAST_FAIL_CLOSED=0 to allow); errors in any other event fail open.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from holdfast.monitor import Config, context_block, evaluate, handle_prompt, observe_post  # noqa: E402
+from holdfast.monitor import Config, context_block, evaluate, handle_prompt, note_new_paths, observe_post  # noqa: E402
 from holdfast.state import Store, project_root  # noqa: E402
 
 
@@ -41,6 +41,8 @@ def run(event: str, payload: dict, cfg: Config | None = None) -> dict | None:
                 st["task_started"] = True
                 st["task_started_at"] = t0
             d = evaluate(tool, tin, st, cwd, root, cfg, payload.get("tool_use_id", ""))
+            if d.decision == "allow":
+                note_new_paths(d.effects, st, root, payload.get("tool_use_id", ""))
             st["decisions"][d.decision] = st["decisions"].get(d.decision, 0) + 1
             store.audit({"event": event, "tool": tool, "tool_input": tin, "agent_id": payload.get("agent_id"),
                          "decision": d.decision if cfg.enforce else f"observe:{d.decision}", "rule_id": d.rule_id,
@@ -122,9 +124,15 @@ def main(argv: list[str] | None = None) -> int:
         _emit(out)
         return 0
     except Exception:
+        # Fail closed on the enforcing event (default): a guard that silently allows on its own bugs is not a guard.
+        # Everything else (prompt extraction, bookkeeping) fails open so the session is never bricked.
         sys.stderr.write("holdfast hook error:\n" + traceback.format_exc())
-        if os.environ.get("HOLDFAST_FAIL_CLOSED") == "1" and event == "PreToolUse":
-            return 2
+        if event == "PreToolUse" and Config().fail_closed and Config().enforce:
+            _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                          "permissionDecisionReason": "Holdfast internal error while evaluating this call "
+                                          "(fail-closed). Retry with a simpler, explicit command; if it persists tell the user "
+                                          "to check `holdfast status`."}})
+            return 0
         return 0
 
 

@@ -16,10 +16,16 @@ from pathlib import Path
 
 
 def project_root(cwd: str | None = None) -> Path:
+    """Claude Code exports CLAUDE_PROJECT_DIR to hooks; otherwise walk up from cwd to the nearest .holdfast/ or .git
+    so that an agent `cd`-ing into a subdirectory keeps the same state (REVIEW.md: state loss on cd)."""
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
         return Path(env)
-    return Path(cwd or os.getcwd())
+    start = Path(cwd or os.getcwd()).resolve()
+    for d in (start, *start.parents):
+        if (d / ".holdfast").is_dir() or (d / ".git").exists():
+            return d
+    return start
 
 
 def state_dir(cwd: str | None = None) -> Path:
@@ -45,6 +51,9 @@ def default_state() -> dict:
         "compactions": 0,
         "subagents": 0,
         "decisions": {"allow": 0, "deny": 0, "ask": 0},
+        "created": [],                # project-relative paths first created in this session (deleting them is not a loss)
+        "pending_created": {},        # tool_use_id -> [paths] written by a call that has not completed yet
+        "errors": 0,                  # internal hook errors (state kept, see hook.main)
     }
 
 
@@ -76,8 +85,19 @@ class Store:
         try:
             with open(self.path) as f:
                 st = json.load(f)
-        except (json.JSONDecodeError, OSError):
+            if not isinstance(st, dict) or not isinstance(st.get("rules", []), list):
+                raise ValueError("session file is not a state object")
+        except (json.JSONDecodeError, OSError, ValueError) as e:
+            # A corrupt / tampered session file must not silently drop the rules: keep a copy, start from the
+            # standing rules and record the incident (REVIEW.md: corrupt session resets to zero rules).
+            try:
+                os.replace(self.path, self.path.with_suffix(f".corrupt.{int(time.time())}.json"))
+            except OSError:
+                pass
             st = default_state()
+            st["rules"] = self._standing_rules()
+            st["errors"] = 1
+            st["corrupt_reload"] = str(e)[:200]
         base = default_state()
         for k, v in base.items():
             st.setdefault(k, v)

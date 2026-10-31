@@ -13,17 +13,27 @@ from .rules import Rule, extract_rules, has_constraint_cue
 AFFIRM = re.compile(r"^\s*(?:yes|y|yep|yeah|yup|sure|ok|okay|confirm(?:ed)?|approved?|go ahead|proceed|do it|go for it|affirmative|please do|i confirm)\b(?:[\s,.!:;-].*)?$", re.I | re.S)
 NEGATE = re.compile(r"^\s*(?:no|nope|don't|do not|stop|cancel|abort|never ?mind|negative|not now|hold on|wait)\b", re.I)
 
+_RETRACT = re.compile(r"^\s*\w+[,!.]?\s+(?:wait|no|nope|don't|do not|hold on|stop|not yet|actually no|never mind)\b", re.I)
+
 DROP = re.compile(r"holdfast:?\s*(?:drop|remove|delete|disable)\s+(?:rule\s+)?(R-[0-9a-f]{6})", re.I)
 LIST = re.compile(r"holdfast:?\s*(?:list|rules|status)\b", re.I)
 
 
+def _env(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
 @dataclass
 class Config:
-    opaque_policy: str = os.environ.get("HOLDFAST_OPAQUE_POLICY", "ask")       # ask | deny | allow  (uncertain matches)
-    confirm_via: str = os.environ.get("HOLDFAST_CONFIRM_VIA", "deny")           # deny (instruct agent to ask in chat) | ask (permission prompt)
-    inject_context: bool = os.environ.get("HOLDFAST_INJECT", "1") != "0"        # re-anchor rules into context on session start/compact/subagent
-    llm_extract: bool = os.environ.get("HOLDFAST_LLM_EXTRACT", "0") == "1"      # recall fallback via `claude -p`
-    enforce: bool = os.environ.get("HOLDFAST_ENFORCE", "1") != "0"              # 0 = observe-only (log decisions, never block)
+    """Runtime knobs, read from the environment at construction time (so hooks and tests can override per call)."""
+    opaque_policy: str = field(default_factory=lambda: _env("HOLDFAST_OPAQUE_POLICY", "ask"))       # ask | deny | allow  (uncertain matches)
+    confirm_via: str = field(default_factory=lambda: _env("HOLDFAST_CONFIRM_VIA", "deny"))           # deny (instruct agent to ask in chat) | ask (permission prompt)
+    inject_context: bool = field(default_factory=lambda: _env("HOLDFAST_INJECT", "1") != "0")        # re-anchor rules into context on session start/compact/subagent
+    llm_extract: bool = field(default_factory=lambda: _env("HOLDFAST_LLM_EXTRACT", "0") == "1")      # recall fallback via `claude -p`
+    enforce: bool = field(default_factory=lambda: _env("HOLDFAST_ENFORCE", "1") != "0")              # 0 = observe-only (log decisions, never block)
+    exempt_created: bool = field(default_factory=lambda: _env("HOLDFAST_EXEMPT_CREATED", "1") != "0")      # deleting a file the agent created this session is not a loss
+    exempt_artifacts: bool = field(default_factory=lambda: _env("HOLDFAST_EXEMPT_ARTIFACTS", "1") != "0")  # __pycache__/.pytest_cache/*.pyc are not protected content
+    fail_closed: bool = field(default_factory=lambda: _env("HOLDFAST_FAIL_CLOSED", "1") != "0")      # internal error in PreToolUse → deny (0 = allow)
 
 
 @dataclass
@@ -41,6 +51,17 @@ class Decision:
 
 
 RANK = {"allow": 0, "ask": 1, "deny": 2}
+
+_GUARD_FILES = re.compile(r"(?:^|/)(?:\.holdfast(?:/|$)|\.claude/settings(?:\.local)?\.json$|\.claude/hooks(?:/|$))")
+_ARTIFACTS = re.compile(r"(?:^|/)(?:__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.tox|\.nox|node_modules/\.cache|\.cache)(?:/|$)|\.py[co]$")
+
+
+def _is_guard_file(target: str) -> bool:
+    return target not in (UNKNOWN,) and bool(_GUARD_FILES.search(target)) or target == EVERYTHING and False
+
+
+def _is_artifact(target: str) -> bool:
+    return target not in (UNKNOWN, EVERYTHING) and bool(_ARTIFACTS.search(target))
 
 
 def rules_of(state: dict) -> list[Rule]:
@@ -63,8 +84,24 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
     best = Decision("allow", effects=effects)
     now = time.time()
 
+    # Built-in: the guard's own state and the hook configuration are never writable by the agent while Holdfast
+    # is installed (REVIEW.md critical: `echo {} > .holdfast/sessions/<sid>.json` emptied every rule).
+    for e in effects:
+        if e.action in ("edit", "write", "delete", "discard", "move") and _is_guard_file(e.target):
+            return Decision("deny", f"Holdfast: {e.action} on {e.target} is blocked — the guard's own state and hook "
+                                    "configuration are read-only for the agent. Ask the user to change Holdfast settings.",
+                            "builtin-selfprotect", effects, matched=[{"rule_id": "builtin-selfprotect", "effect": e.as_dict(),
+                                                                       "decision": "deny", "uncertain": False}])
+        if e.action in ("edit", "write") and e.target == EVERYTHING:
+            pass
+
+    created = set(state.get("created", []))
     for rule in rules:
         for e in effects:
+            if e.action in ("delete", "move") and cfg.exempt_created and e.target in created and rule.action in ("delete", "modify", "destructive"):
+                continue   # the agent created this file in this session: removing it loses nothing of the user's
+            if e.action in ("delete", "move", "edit", "write") and cfg.exempt_artifacts and _is_artifact(e.target) and rule.action != "*":
+                continue   # regenerable caches (__pycache__, .pytest_cache, *.pyc) are not what "never delete" protects
             m = rule.matches(e)
             if m is False and e.action == "exec_opaque" and not e.certain:
                 # an opaque execution (script file, unreadable make/npm target, decoded blob, eval of a variable)
@@ -139,13 +176,51 @@ def observe_post(tool_name: str, tool_input: dict, tool_response: dict | str, st
             state["last_commit_at"] = now
     if tool_name == "Bash":
         resp = tool_response if isinstance(tool_response, dict) else {"stdout": str(tool_response)}
-        ok = is_test_success(tool_input.get("command", ""), resp.get("stdout", ""), resp.get("stderr", ""))
-        if ok is True and not resp.get("interrupted"):
-            state["tests_passed_at"] = now
-            changed["tests_passed_at"] = now
+        cmd = tool_input.get("command", "")
+        ok = is_test_success(cmd, resp.get("stdout", ""), resp.get("stderr", ""))
+        if ok is True and not resp.get("interrupted") and not _prints_fake_summary(cmd):
+            # `edit && pytest` in one call: effects are emitted in command order, so if the test run comes after
+            # the last edit the pass is fresh (otherwise same-tick edit and test would be treated as stale)
+            acts = [e.action for e in effects]
+            last_edit = max((i for i, a in enumerate(acts) if a in ("edit", "write", "delete", "move", "discard")), default=-1)
+            first_test = next((i for i, a in enumerate(acts) if a == "test"), -1)
+            ts = now + 1e-3 if first_test > last_edit else now
+            state["tests_passed_at"] = ts
+            changed["tests_passed_at"] = ts
         elif ok is False:
             state["tests_failed_at"] = now
+    # files that did not exist before this call now exist: they were created by the agent (see hook PreToolUse)
+    tid = state.get("_last_tool_use_id")
+    pend = state.get("pending_created", {}).pop(tid, None) if tid else None
+    if pend:
+        state.setdefault("created", [])
+        for pth in pend:
+            if pth not in state["created"]:
+                state["created"].append(pth)
+        changed["created"] = pend
     return changed
+
+
+_FAKE = re.compile(r"\b(?:echo|printf)\b[^|;&]*\b(?:passed|PASS|ok)\b", re.I)
+
+
+def _prints_fake_summary(cmd: str) -> bool:
+    """`pytest --version; echo '3 passed'` must not count as a green run (REVIEW.md)."""
+    return bool(_FAKE.search(cmd))
+
+
+def note_new_paths(effects: list[Effect], state: dict, root: str | None, tool_use_id: str) -> None:
+    """PreToolUse: remember which write targets do not exist yet; PostToolUse moves them to `created`."""
+    if not root or not tool_use_id:
+        return
+    new = []
+    for e in effects:
+        if e.action in ("write", "edit") and e.target not in (UNKNOWN, EVERYTHING) and not e.target.startswith("/") \
+                and "*" not in e.target and not os.path.exists(os.path.join(root, e.target)):
+            new.append(e.target)
+    if new:
+        state.setdefault("pending_created", {})[tool_use_id] = new
+    state["_last_tool_use_id"] = tool_use_id
 
 
 def register_rules(state: dict, new_rules: list[Rule]) -> list[Rule]:
@@ -209,7 +284,7 @@ def handle_prompt(prompt: str, state: dict, cfg: Config) -> dict:
 
     pending = state.get("pending_confirm")
     if pending:
-        if AFFIRM.match(p):
+        if AFFIRM.match(p) and not _RETRACT.match(p):
             state.setdefault("confirmations", {})[pending["rule_id"]] = {"granted_at": time.time(), "consumed": False, "mode": "once", "turn": state["turn"]}
             out["granted"] = pending
             state["pending_confirm"] = None

@@ -62,6 +62,13 @@ class Scope:
             for g in self.paths:
                 if _path_in_scope(e.target, g):
                     return True
+            if re.search(r"[*?\[]", e.target):
+                # a glob target: certain when its literal prefix is inside the scope (`data/**/*.csv` under data/**),
+                # uncertain when it could expand into the scope (`da*`, `**/__pycache__`)
+                prefix = re.split(r"[*?\[]", e.target, 1)[0].rstrip("/")
+                if prefix and any(_path_in_scope(prefix, g) for g in self.paths):
+                    return True
+                return None
             return False
         if e.target == UNKNOWN:
             return None
@@ -220,9 +227,9 @@ def make_id(text: str, kind: str, action: str) -> str:
 # ---------------------------------------------------------------------------
 
 _PATH_ALIASES = {
-    "tests": ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*", "**/tests/**", "**/__tests__/**"],
-    "test": ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*", "**/tests/**"],
-    "the tests": ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*", "**/tests/**"],
+    "tests": ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*", "**/tests/**", "**/__tests__/**", "**/conftest.py", "pytest.ini", "setup.cfg", "tox.ini"],
+    "test": ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*", "**/tests/**", "**/conftest.py", "pytest.ini", "setup.cfg", "tox.ini"],
+    "the tests": ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*", "**/tests/**", "**/conftest.py", "pytest.ini", "setup.cfg", "tox.ini"],
     "config": ["config/**", "*.config.*", "*.cfg", "*.ini", "*.toml", "*.yaml", "*.yml", ".env*"],
     "the config": ["config/**", "*.config.*", "*.cfg", "*.ini", "*.toml", "*.yaml", "*.yml", ".env*"],
     "migrations": ["**/migrations/**"],

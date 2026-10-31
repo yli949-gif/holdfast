@@ -115,3 +115,106 @@ class TestOpaqueAndConcrete:
         # unknown target stays an ask
         d = ev(st, *bash("python3 -c \"import os,sys; os.remove(sys.argv[1])\" data/a.csv"), opaque_policy="ask")
         assert d.decision in ("ask", "deny")
+
+
+# ---------------------------------------------------------------- fixes from docs/REVIEW.md and the base1 e2e batch
+
+import json
+import os
+
+from holdfast.monitor import observe_post, note_new_paths
+from holdfast.state import Store, project_root
+
+
+class TestSelfProtection:
+    def test_agent_cannot_edit_guard_state_or_hooks(self):
+        st = default_state()
+        for tool, tin in [("Write", {"file_path": "/repo/.holdfast/sessions/s.json", "content": "{}"}),
+                          ("Edit", {"file_path": "/repo/.claude/settings.json"}),
+                          bash("echo '{}' > .holdfast/rules.json"),
+                          bash("rm -rf .holdfast")]:
+            d = ev(st, tool, tin)
+            assert d.decision == "deny" and d.rule_id == "builtin-selfprotect", (tool, tin)
+
+    def test_reading_guard_state_is_fine(self):
+        assert ev(default_state(), *bash("cat .holdfast/audit.jsonl")).decision == "allow"
+
+
+class TestCreatedAndArtifacts:
+    def test_deleting_a_file_the_agent_created_is_allowed(self, tmp_path):
+        root = str(tmp_path)
+        st = st_with_prompt("Never delete anything.")
+        d = evaluate("Write", {"file_path": f"{root}/scratch.py", "content": "x"}, st, root, root, cfg(), "t1")
+        assert d.decision == "allow"
+        note_new_paths(d.effects, st, root, "t1")
+        (tmp_path / "scratch.py").write_text("x")
+        observe_post("Write", {"file_path": f"{root}/scratch.py"}, {}, st, root, root)
+        assert "scratch.py" in st["created"]
+        assert evaluate("Bash", {"command": "rm scratch.py"}, st, root, root, cfg()).decision == "allow"
+        assert evaluate("Bash", {"command": "rm README.md"}, st, root, root, cfg()).decision == "deny"
+
+    def test_pre_existing_file_is_not_marked_created(self, tmp_path):
+        root = str(tmp_path)
+        (tmp_path / "keep.py").write_text("x")
+        st = st_with_prompt("Never delete anything.")
+        d = evaluate("Write", {"file_path": f"{root}/keep.py", "content": "y"}, st, root, root, cfg(), "t2")
+        note_new_paths(d.effects, st, root, "t2")
+        observe_post("Write", {"file_path": f"{root}/keep.py"}, {}, st, root, root)
+        assert "keep.py" not in st["created"]
+
+    def test_caches_are_not_protected_content(self):
+        st = st_with_prompt("Never delete anything under data/.")
+        assert ev(st, *bash("rm -rf data/__pycache__ data/x/.pytest_cache data/a.pyc")).decision == "allow"
+        assert ev(st, *bash("rm -rf data/a.csv")).decision == "deny"
+        assert ev(st, *bash("rm -rf data/a.csv"), exempt_artifacts=False).decision == "deny"
+        assert ev(st, *bash("rm -rf data/__pycache__"), exempt_artifacts=False).decision == "deny"
+
+
+class TestTestFreshness:
+    def test_edit_then_pytest_in_one_command_is_fresh(self):
+        st = st_with_prompt("Only push after the tests pass.")
+        cmd = "python - <<'E'\np='src/a.py'\nopen(p,'w').write('x')\nE\npython -m pytest -q 2>&1 | tail -3"
+        observe_post("Bash", {"command": cmd}, {"stdout": "4 passed in 0.01s", "stderr": ""}, st, ROOT, ROOT)
+        assert ev(st, *bash("git push origin main")).decision == "allow"
+
+    def test_pytest_then_edit_in_one_command_is_stale(self):
+        st = st_with_prompt("Only push after the tests pass.")
+        cmd = "python -m pytest -q && sed -i 's/a/b/' src/a.py"
+        observe_post("Bash", {"command": cmd}, {"stdout": "4 passed", "stderr": ""}, st, ROOT, ROOT)
+        assert ev(st, *bash("git push origin main")).decision == "deny"
+
+    def test_echoed_summary_does_not_count(self):
+        st = st_with_prompt("Only push after the tests pass.")
+        observe_post("Bash", {"command": "pytest --version; echo '3 passed'"}, {"stdout": "pytest 8.0\n3 passed", "stderr": ""}, st, ROOT, ROOT)
+        assert ev(st, *bash("git push origin main")).decision == "deny"
+
+
+class TestStateRobustness:
+    def test_corrupt_session_file_keeps_standing_rules_and_is_quarantined(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+        monkeypatch.delenv("HOLDFAST_DIR", raising=False)
+        root = tmp_path
+        (root / ".git").mkdir()
+        (root / ".holdfast").mkdir()
+        (root / ".holdfast" / "rules.json").write_text(json.dumps({"rules": [{"kind": "forbid", "action": "force_push", "text": "never force push"}]}))
+        store = Store("sid", str(root))
+        store.path.write_text("{garbage")
+        with store.locked() as st:
+            assert len(st["rules"]) == 1 and st["errors"] == 1
+        assert list((root / ".holdfast" / "sessions").glob("sid.corrupt.*.json"))
+
+    def test_cd_into_subdirectory_keeps_the_same_state(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+        (tmp_path / ".git").mkdir()
+        sub = tmp_path / "src" / "pkg"
+        sub.mkdir(parents=True)
+        assert project_root(str(sub)) == tmp_path.resolve()
+
+
+class TestConfirmationWording:
+    def test_yes_then_retraction_is_not_a_yes(self):
+        st = st_with_prompt("Ask me before deleting anything.")
+        ev(st, *bash("rm -f x.txt"))
+        out = handle_prompt("okay wait, which files exactly?", st, cfg())
+        assert out["granted"] is None
+        assert ev(st, *bash("rm -f x.txt")).decision == "deny"

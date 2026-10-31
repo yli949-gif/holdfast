@@ -328,27 +328,32 @@ class TestMain:
         assert hook.main(["PreToolUse"]) == 0
         assert capsys.readouterr().out == ""
 
-    def test_fail_open_on_garbage(self, proj, monkeypatch, capsys):
+    def test_garbage_stdin_fails_closed_by_default(self, proj, monkeypatch, capsys):
+        # a guard that allows on its own errors is not a guard (REVIEW.md): PreToolUse denies with a reason
+        monkeypatch.setattr("sys.stdin", io.StringIO("this is not json {"))
+        assert hook.main(["PreToolUse"]) == 0
+        captured = capsys.readouterr()
+        out = json.loads(captured.out)
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny" and "fail-closed" in out["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "holdfast hook error" in captured.err
+
+    def test_fail_open_opt_in(self, proj, monkeypatch, capsys):
+        monkeypatch.setenv("HOLDFAST_FAIL_CLOSED", "0")
         monkeypatch.setattr("sys.stdin", io.StringIO("this is not json {"))
         assert hook.main(["PreToolUse"]) == 0
         captured = capsys.readouterr()
         assert captured.out == "" and "holdfast hook error" in captured.err
 
-    def test_fail_closed(self, proj, monkeypatch, capsys):
-        monkeypatch.setenv("HOLDFAST_FAIL_CLOSED", "1")
-        monkeypatch.setattr("sys.stdin", io.StringIO("this is not json {"))
-        assert hook.main(["PreToolUse"]) == 2
-        assert "holdfast hook error" in capsys.readouterr().err
-
     def test_fail_closed_only_applies_to_pretooluse(self, proj, monkeypatch, capsys):
-        monkeypatch.setenv("HOLDFAST_FAIL_CLOSED", "1")
         monkeypatch.setattr("sys.stdin", io.StringIO("garbage"))
-        assert hook.main(["PostToolUse"]) == 0
+        assert hook.main(["PostToolUse"]) == 0 and capsys.readouterr().out == ""
 
-    def test_internal_error_fails_open(self, proj, monkeypatch, capsys):
+    def test_internal_error_denies_then_allows_when_opted_out(self, proj, monkeypatch, capsys):
         monkeypatch.setattr(hook, "evaluate", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(pre(proj, "Bash", bash_input("ls")))))
         assert hook.main(["PreToolUse"]) == 0
-        monkeypatch.setenv("HOLDFAST_FAIL_CLOSED", "1")
+        assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+        monkeypatch.setenv("HOLDFAST_FAIL_CLOSED", "0")
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(pre(proj, "Bash", bash_input("ls")))))
-        assert hook.main(["PreToolUse"]) == 2
+        assert hook.main(["PreToolUse"]) == 0
+        assert capsys.readouterr().out == ""
