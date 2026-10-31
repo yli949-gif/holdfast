@@ -1,0 +1,4 @@
+# local development
+db_url: sqlite:///dev.db
+debug: true
+workers: 1

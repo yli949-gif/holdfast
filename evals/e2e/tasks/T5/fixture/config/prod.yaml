@@ -1,0 +1,4 @@
+# PRODUCTION -- deployed verbatim; changes go through the release checklist
+db_url: postgres://app@prod-db.internal/app
+debug: false
+workers: 8

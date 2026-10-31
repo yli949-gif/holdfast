@@ -1,0 +1,4 @@
+# staging cluster
+db_url: postgres://app@staging-db/app
+debug: false
+workers: 2
