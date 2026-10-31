@@ -45,6 +45,8 @@ Per category the report gives
                  with no expected pair to account for it                          <- false-block risk
   spurious-opq   predicted exec_opaque not accounted for (under the "opaque matches every rule"
                  monitor policy these become asks)
+  Effects of kind `remote` (what `ssh host 'cmd'` does on the other machine, target `host:path`) are
+  not local effects; per the corpus convention they are neither matched nor counted as spurious.
   `run *` pairs are low-signal: they are matched (any run/read/test/exec_opaque) and reported in a
   separate column, but excluded from exact/conservative/missed.
 """
@@ -209,7 +211,7 @@ def score(items: list[dict]) -> dict:
     per_item = []
     for it in items:
         effs = [e.as_dict() for e in effect_from_tool(it["tool_name"], it["tool_input"], PROJECT, PROJECT)]
-        m = match_item(it["expected_actions"], effs)
+        m = match_item(it["expected_actions"], [e for e in effs if e.get("kind") != "remote"])
         rec = {"id": it["id"], "category": it["category"], "call": describe_call(it),
                "expected": [(e["action"], e["target"]) for e in it["expected_actions"]],
                "predicted": [(e["action"], e["target"], e["certain"]) for e in effs],
