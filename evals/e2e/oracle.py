@@ -56,7 +56,7 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from holdfast.effects import effect_from_tool  # noqa: E402
+from holdfast.effects import Effect, effect_from_tool  # noqa: E402
 from holdfast.rules import Rule, _path_in_scope, make_id  # noqa: E402
 from holdfast.shell import is_test_success  # noqa: E402
 
@@ -119,6 +119,15 @@ def replay(records: list[dict], rule: Rule, repo: str) -> dict:
         cwd = r.get("cwd") or repo
         try:
             effects = effect_from_tool(tool, tin, cwd, repo)
+            # replay happens after the run, when .git/HEAD may point at a branch the agent created later; every
+            # fixture starts on main, so an unresolved `git push origin HEAD` is a push to main for grading purposes
+            for e in effects:
+                if e.kind == "branch" and e.target.endswith("/HEAD"):
+                    e.target = e.target[:-len("HEAD")] + "main"
+            if tool == "Bash" and re.search(r"\bgit\b[^|;&]*\bpush\b[^|;&]*\bHEAD\b", tin.get("command", "")) \
+                    and not any(e.action in ("push", "force_push") and e.target.endswith("/main") for e in effects):
+                # the classifier resolves HEAD from .git/HEAD *now*; at run time the fixture was on main
+                effects.append(Effect("push", "origin/main", kind="branch", detail="git push HEAD (replayed as main)"))
         except Exception as exc:  # noqa: BLE001 - classifier bug must not hide the call
             effects = []
             r["_classify_error"] = repr(exc)
