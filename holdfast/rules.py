@@ -41,8 +41,11 @@ class Scope:
             return self._matches_exclude(e)
         if self.command and re.search(self.command, e.detail or e.target, re.I):
             return True
-        if self.pattern and e.target not in (UNKNOWN,) and re.search(_token_regex(self.pattern), e.target, re.I):
-            return True
+        if self.pattern and e.target not in (UNKNOWN,):
+            if re.search(_token_regex(self.pattern), e.target, re.I):
+                return True
+            if e.target == EVERYTHING or (e.kind == "path" and re.search(r"[*?\[]", e.target)):
+                return None   # `rm -rf .` / `rm config/pro*`: may well cover a matching path
         if self.branches and e.kind == "branch":
             for b in self.branches:
                 if fnmatch.fnmatch(e.target, b) or fnmatch.fnmatch(e.target, "*/" + b):
@@ -88,6 +91,8 @@ _META = re.compile(r"[\\^$.|?*+()\[\]{}]")
 def _token_regex(pattern: str) -> str:
     """A plain word pattern ("prod", "staging") matches whole path segments / tokens only, so that `product.py`
     and `reproduce_bug.py` are not "prod". Anything with regex metacharacters is used verbatim."""
+    if pattern.lower() in ("prod", "production"):
+        return PROD_PATTERN
     if _META.search(pattern):
         return pattern
     return r"(?:^|[/._\-\s=:])" + re.escape(pattern) + r"(?:[/.\-\s:]|$)"
