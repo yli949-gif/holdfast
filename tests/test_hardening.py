@@ -311,3 +311,106 @@ class TestConfirmationScope:
         assert d.bash("rm data.txt") == "deny"
         d.say("yes, delete the file")
         assert d.bash("rm data.txt") == "allow"
+
+
+# ------------------------------------------------------------------ N4 / N5 / N10 / N14: what counts as "tests passed"
+
+@pytest.fixture
+def red_suite(repo):
+    """Suite = 2 passing files + tests/test_bad.py failing."""
+    (repo / "tests" / "test_bad.py").write_text("def test_bad():\n    assert False\n")
+    sh("git add -A && git commit -qm bad", repo)
+    return repo
+
+
+class TestTestsPassPredicate:
+    @pytest.mark.parametrize("partial", ["python -m pytest -q tests/test_a.py", "python -m pytest -q -k test_a",
+                                         "python -m pytest -q --deselect tests/test_bad.py::test_bad",
+                                         "python -m pytest -q tests/test_a.py::test_a", "python -m pytest -q --lf"])
+    def test_partial_run_does_not_unlock_push(self, red_suite, partial):
+        d = Driver(red_suite)
+        d.say("only push after tests pass")
+        before = remote_head(red_suite)
+        d.bash(partial)
+        assert d.bash("git push -q origin main") == "deny"
+        assert remote_head(red_suite) == before
+
+    @pytest.mark.parametrize("forge", [
+        "python -m pytest --version; cat notes.txt",
+        "python -m pytest --version; echo '5 pas''sed'",
+        "python -m pytest --version && python3 -c \"print('5 passed')\"",
+        "python -m pytest -q 2>&1 | sed 's/failed/passed/; s/FAILED/PASSED/; s/Error/err/'",
+        "python -m pytest -q 2>&1 | grep -v failed",
+    ])
+    def test_forged_green_run_does_not_unlock_push(self, red_suite, forge):
+        (red_suite / "notes.txt").write_text("5 passed in 0.1s\n")
+        d = Driver(red_suite)
+        d.say("only push after tests pass")
+        before = remote_head(red_suite)
+        d.bash(forge)
+        assert d.bash("git push -q origin main") == "deny"
+        assert remote_head(red_suite) == before
+
+    def test_npm_test_echo_ok_is_not_a_test_run(self, repo):
+        (repo / "package.json").write_text(json.dumps({"scripts": {"test": "echo ok"}}))
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        d.bash("npm test", execute=False)
+        hook.run("PostToolUse", d._p("PostToolUse", tool_name="Bash", tool_input={"command": "npm test"},
+                                    tool_response={"stdout": "ok\n", "stderr": ""}, tool_use_id="x"), CFG)
+        assert d.bash("git push -q origin main", execute=False) == "deny"
+
+    def test_full_green_run_unlocks_and_tail_pipe_is_fine(self, repo):
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        assert d.bash("python -m pytest -q 2>&1 | tail -3") == "allow"
+        assert d.bash("git push -q origin main") == "allow"
+
+    def test_piped_failing_suite_is_not_green(self, red_suite):
+        d = Driver(red_suite)
+        d.say("only push after tests pass")
+        d.bash("python -m pytest -q 2>&1 | tail -15")
+        assert d.bash("git push -q origin main") == "deny"
+
+    def test_pull_after_green_run_is_stale(self, repo, tmp_path):
+        other = tmp_path / "other"
+        sh(f"git clone -q -b main {tmp_path / 'origin.git'} {other}", tmp_path)
+        sh("git config user.email t@t && git config user.name t", other)
+        (other / "tests" / "test_up.py").write_text("def test_up():\n    assert False\n")
+        sh("git add -A && git commit -qm up && git push -q origin main", other)
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        assert d.bash("python -m pytest -q") == "allow"
+        d.bash("git pull -q --rebase origin main")
+        assert d.bash("git push -q origin main") == "deny"
+
+    def test_edit_during_test_run_makes_it_stale(self, repo):
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        dec, t_test = d.decide("Bash", {"command": "python -m pytest -q"})          # run starts
+        assert dec == "allow"
+        dec, t_edit = d.decide("Edit", {"file_path": str(repo / "src/a.py"), "old_string": "1", "new_string": "2"})
+        hook.run("PostToolUse", d._p("PostToolUse", tool_name="Edit", tool_input={"file_path": str(repo / "src/a.py")},
+                                    tool_response={}, tool_use_id=t_edit), CFG)       # parallel edit lands mid-run
+        hook.run("PostToolUse", d._p("PostToolUse", tool_name="Bash", tool_input={"command": "python -m pytest -q"},
+                                    tool_response={"stdout": "2 passed in 0.01s", "stderr": ""}, tool_use_id=t_test), CFG)
+        assert d.bash("git push -q origin main", execute=False) == "deny"
+
+    def test_failure_event_records_red(self, repo):
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        assert d.bash("python -m pytest -q") == "allow"
+        dec, tid = d.decide("Bash", {"command": "python -m pytest -q"})
+        hook.run("PostToolUseFailure", d._p("PostToolUseFailure", tool_name="Bash", tool_input={"command": "python -m pytest -q"},
+                                           tool_use_id=tid, error="Exit code 1"), CFG)
+        assert d.bash("git push -q origin main", execute=False) == "deny"
+
+    def test_parallel_writes_credit_the_right_file(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        _, ta = d.decide("Write", {"file_path": str(repo / "scratch_a.txt"), "content": "a"})
+        _, tb = d.decide("Write", {"file_path": str(repo / "scratch_b.txt"), "content": "b"})
+        (repo / "scratch_a.txt").write_text("a")
+        hook.run("PostToolUse", d._p("PostToolUse", tool_name="Write", tool_input={"file_path": str(repo / "scratch_a.txt")},
+                                    tool_response={}, tool_use_id=ta), CFG)
+        assert d.bash("rm scratch_a.txt") == "allow"

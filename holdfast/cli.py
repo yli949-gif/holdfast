@@ -11,7 +11,7 @@ from .rules import Rule, Scope, extract_rules, make_id
 from .state import Store, state_dir, project_root
 
 HOOK_PY = Path(__file__).resolve().parent / "hook.py"
-EVENTS = ["PreToolUse", "PostToolUse", "UserPromptSubmit", "SessionStart", "SubagentStart", "PreCompact", "PostCompact"]
+EVENTS = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "SessionStart", "SubagentStart", "PreCompact", "PostCompact"]
 
 
 def hooks_config(python: str = "python3", hook_py: str | None = None, timeout: int = 15) -> dict:
@@ -22,7 +22,7 @@ def hooks_config(python: str = "python3", hook_py: str | None = None, timeout: i
         if ev == "PreToolUse":
             entry["onFailure"] = "block"   # fail closed if the hook itself crashes (Claude Code ≥ 2.1.295)
         block = {"hooks": [entry]}
-        if ev in ("PreToolUse", "PostToolUse"):
+        if ev in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
             block["matcher"] = ""
         cfg[ev] = [block]
     return {"hooks": cfg}

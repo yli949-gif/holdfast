@@ -43,6 +43,8 @@ def run(event: str, payload: dict, cfg: Config | None = None) -> dict | None:
             d = evaluate(tool, tin, st, cwd, root, cfg, payload.get("tool_use_id", ""))
             if d.decision == "allow":
                 note_new_paths(d.effects, st, root, payload.get("tool_use_id", ""))
+                if payload.get("tool_use_id") and any(e.action == "test" for e in d.effects):
+                    st.setdefault("test_started", {})[payload["tool_use_id"]] = t0
             st["decisions"][d.decision] = st["decisions"].get(d.decision, 0) + 1
             store.audit({"event": event, "tool": tool, "tool_input": tin, "agent_id": payload.get("agent_id"),
                          "decision": d.decision if cfg.enforce else f"observe:{d.decision}", "rule_id": d.rule_id,
@@ -53,10 +55,14 @@ def run(event: str, payload: dict, cfg: Config | None = None) -> dict | None:
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": d.decision,
                                        "permissionDecisionReason": d.reason}}
 
-    if event == "PostToolUse":
+    if event in ("PostToolUse", "PostToolUseFailure"):
         tool, tin = payload.get("tool_name", ""), payload.get("tool_input", {}) or {}
+        resp = payload.get("tool_response", {})
+        if event == "PostToolUseFailure" and not resp:
+            resp = {"stdout": "", "stderr": str(payload.get("error", ""))}
         with store.locked() as st:
-            changed = observe_post(tool, tin, payload.get("tool_response", {}), st, cwd, root)
+            changed = observe_post(tool, tin, resp, st, cwd, root, payload.get("tool_use_id", ""),
+                                   failed=(event == "PostToolUseFailure"))
         if changed:
             store.audit({"event": event, "tool": tool, "state_changed": changed})
         return None

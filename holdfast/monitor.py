@@ -179,9 +179,14 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
                                              f"Blocked effect: {e.action} {e.target}. Adjust your approach instead of editing frozen files.", rule.id, effects)
             elif rule.kind == "require_before":
                 if rule.prerequisite == "tests_pass" and not _tests_fresh(state):
-                    cand = Decision("deny", f"Holdfast rule {rule.id}: {rule.describe()}. "
-                                             + ("Tests have not passed since the last edit; run the test suite first."
-                                                if state.get("tests_passed_at") else "No passing test run recorded in this session; run the test suite first."),
+                    if (state.get("tests_partial_at") or 0) > (state.get("tests_passed_at") or 0):
+                        why = "The last green run was partial (a file, -k/-m, --lf, --deselect...); run the whole suite."
+                    elif state.get("tests_passed_at"):
+                        why = "Tests have not passed since the last edit or tree-changing git command; run the test suite first."
+                    else:
+                        why = "No passing test run recorded in this session; run the test suite first."
+                    cand = Decision("deny", f"Holdfast rule {rule.id}: {rule.describe()}. {why} "
+                                            "(Run the test command on its own — not chained with other commands.)",
                                     rule.id, effects)
                 elif rule.prerequisite == "user_confirm":
                     rule.kind = "confirm"  # fallthrough semantics
@@ -231,9 +236,11 @@ def _grant_covers(grant: dict, e: Effect, state: dict) -> bool:
     return any(_target_covers(t, e.target) for t in targets)
 
 
-def observe_post(tool_name: str, tool_input: dict, tool_response: dict | str, state: dict, cwd: str, root: str | None) -> dict:
-    """Update temporal state after a tool ran."""
+def observe_post(tool_name: str, tool_input: dict, tool_response: dict | str, state: dict, cwd: str, root: str | None,
+                 tool_use_id: str = "", failed: bool = False) -> dict:
+    """Update temporal state after a tool ran (PostToolUse, or PostToolUseFailure with failed=True)."""
     from .shell import is_test_success
+    from .testruns import FULL, PARTIAL, test_run_kind, tree_changing_git
     effects = effect_from_tool(tool_name, tool_input, cwd, root)
     now = time.time()
     changed = {}
@@ -243,25 +250,35 @@ def observe_post(tool_name: str, tool_input: dict, tool_response: dict | str, st
             changed["last_edit_at"] = now
         if e.action == "commit":
             state["last_commit_at"] = now
+    started = state.get("test_started", {}).pop(tool_use_id, None) if tool_use_id else None
     if tool_name == "Bash":
         resp = tool_response if isinstance(tool_response, dict) else {"stdout": str(tool_response)}
         cmd = tool_input.get("command", "")
+        if tree_changing_git(cmd):
+            # pull/merge/rebase/stash pop/checkout rewrite the tree: an earlier green run is stale (REVIEW-2 N5)
+            state["last_edit_at"] = now
+            changed["last_edit_at"] = now
         ok = is_test_success(cmd, resp.get("stdout", ""), resp.get("stderr", ""))
-        if ok is True and not resp.get("interrupted") and not _prints_fake_summary(cmd):
-            # `edit && pytest` in one call: effects are emitted in command order, so if the test run comes after
-            # the last edit the pass is fresh (otherwise same-tick edit and test would be treated as stale)
-            acts = [e.action for e in effects]
-            last_edit = max((i for i, a in enumerate(acts) if a in ("edit", "write", "delete", "move", "discard")), default=-1)
-            first_test = next((i for i, a in enumerate(acts) if a == "test"), -1)
-            ts = now + 1e-3 if first_test > last_edit else now
+        if failed and ok is not None:
+            ok = False
+        kind = test_run_kind(cmd, cwd, root) if ok is not None else ""
+        if ok is True and kind == FULL and not resp.get("interrupted") and not _prints_fake_summary(cmd):
+            # stamped with the time the run *started*: an edit that lands while it runs makes it stale (N5 race)
+            ts = started if started else now
             state["tests_passed_at"] = ts
             changed["tests_passed_at"] = ts
+        elif ok is True and kind == PARTIAL:
+            state["tests_partial_at"] = now
+            changed["tests_partial_at"] = now
         elif ok is False:
             state["tests_failed_at"] = now
+            if kind == FULL:
+                state["tests_passed_at"] = None
+                changed["tests_passed_at"] = None
     # files that did not exist before this call now exist: they were created by the agent (see hook PreToolUse)
-    tid = state.get("_last_tool_use_id")
+    tid = tool_use_id or state.get("_last_tool_use_id")
     pend = state.get("pending_created", {}).pop(tid, None) if tid else None
-    if pend:
+    if pend and not failed:
         state.setdefault("created", [])
         for pth in pend:
             if pth not in state["created"]:
