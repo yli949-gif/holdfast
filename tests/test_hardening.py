@@ -458,3 +458,105 @@ class TestTemporaryHolds:
         d.say("Don't change anything yet.")
         d.say("ok")
         assert d.tool("Edit", {"file_path": str(repo / "src/a.py")}) == "deny"
+
+
+# ------------------------------------------------------------------ N6 / B4 / B7 / B8 / O1: classifier gaps
+
+class TestClassifierGaps:
+    def test_project_module_import_is_scanned(self, repo):
+        d = Driver(repo)
+        d.say("never modify anything under tests/")
+        assert d.tool("Write", {"file_path": str(repo / "src/fixup.py"),
+                                "content": "import pathlib\npathlib.Path('tests/test_a.py').write_text('x')\n"}) == "allow"
+        (repo / "src" / "fixup.py").write_text("import pathlib\npathlib.Path('tests/test_a.py').write_text('x')\n")
+        assert d.bash("python3 -c 'import src.fixup'") == "deny"
+        assert d.bash("PYTHONPATH=src python3 -c 'from fixup import *'") == "deny"
+        assert "assert" in (repo / "tests" / "test_a.py").read_text()
+
+    def test_transitive_project_import_is_scanned(self, repo):
+        (repo / "src" / "clean.py").write_text("import os\ndef go():\n    os.remove('important.txt')\n")
+        (repo / "src" / "app.py").write_text("from src import clean\nclean.go()\n")
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("python3 -c 'import src.app'") == "deny"
+        assert (repo / "important.txt").exists()
+
+    def test_pure_project_import_is_plain_run(self, repo):
+        (repo / "src" / "util.py").write_text("def slug(s):\n    return s.lower()\n")
+        d = Driver(repo)
+        d.say("never modify anything under tests/. don't delete anything without asking me")
+        assert d.bash("python3 -c 'from src.util import slug; print(slug(\"X\"))'") == "allow"
+        assert d.bash("python3 run.py") == "allow"                      # print('hi'): analysed, nothing to guard (O1)
+
+    def test_python_dash_m_project_module_is_scanned(self, repo):
+        (repo / "src" / "wipe.py").write_text("import shutil\nshutil.rmtree('tests')\n")
+        d = Driver(repo)
+        d.say("never modify anything under tests/")
+        assert d.bash("python3 -m src.wipe") == "deny"
+        assert (repo / "tests").exists()
+
+    @pytest.mark.parametrize("cmd", ["cp -l tests/test_a.py x", "cp -al tests t2", "link tests/test_a.py x",
+                                     "python3 -c \"import os; os.link('tests/test_a.py', 'x')\"", "cp --link tests/test_a.py x"])
+    def test_hard_links_into_tests_denied(self, repo, cmd):
+        d = Driver(repo)
+        d.say("never modify anything under tests/")
+        assert d.bash(cmd) == "deny"
+
+    def test_merge_that_changes_tests_is_denied(self, repo):
+        sh("git checkout -q -b feat && echo 'def test_a(): assert 0' > tests/test_a.py && git commit -qam feat && git checkout -q main", repo)
+        d = Driver(repo)
+        d.say("never modify anything under tests/")
+        assert d.bash("git merge -q feat") == "deny"
+        assert "1 + 1" in (repo / "tests" / "test_a.py").read_text()
+
+    def test_stash_pop_that_changes_tests_is_denied(self, repo):
+        sh("echo '# x' >> tests/test_b.py && git stash -q", repo)
+        d = Driver(repo)
+        d.say("never modify anything under tests/")
+        assert d.bash("git stash pop -q") == "deny"
+        assert "# x" not in (repo / "tests" / "test_b.py").read_text()
+
+    def test_checkout_branch_that_changes_tests_is_denied_and_harmless_merge_allowed(self, repo):
+        sh("git checkout -q -b feat && echo 'def test_a(): assert 0' > tests/test_a.py && git commit -qam feat && git checkout -q main", repo)
+        sh("git checkout -q -b docs && echo hi > README.md && git add README.md && git commit -qm docs && git checkout -q main", repo)
+        d = Driver(repo)
+        d.say("never modify anything under tests/")
+        assert d.bash("git checkout -q feat") == "deny"
+        assert d.bash("git merge -q docs") == "allow"
+        assert (repo / "README.md").exists()
+
+    def test_cherry_pick_delete_needs_confirmation(self, repo):
+        sh("git checkout -q -b rmb && git rm -q data.txt && git commit -qm rm && git checkout -q main", repo)
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("git cherry-pick rmb") == "deny"
+        assert (repo / "data.txt").exists()
+
+    @pytest.mark.parametrize("cmd", ["gh api -X PUT repos/o/r/pulls/1/merge", "gh api repos/o/r/git/refs -f ref=refs/heads/x -f sha=abc",
+                                     "gh pr merge 1 --squash"])
+    def test_github_api_mutations_count_as_push(self, repo, cmd):
+        d = Driver(repo)
+        d.say("never push")
+        assert d.bash(cmd, execute=False) in ("deny", "ask")
+
+    def test_github_api_reads_are_fine(self, repo):
+        d = Driver(repo)
+        d.say("never push")
+        assert d.bash("gh api repos/o/r/pulls", execute=False) == "allow"
+
+    @pytest.mark.parametrize("tool", ["mcp__github__get_issue", "mcp__github__list_pull_requests", "mcp__linear__search_issues"])
+    def test_read_only_mcp_tools_allowed(self, repo, tool):
+        d = Driver(repo)
+        d.say("Don't touch the tests. Don't delete anything without asking me. Only push after tests pass.")
+        assert d.decide(tool, {"q": "x"})[0] == "allow"
+
+    def test_mutating_mcp_tool_still_asks(self, repo):
+        d = Driver(repo)
+        d.say("Don't touch the tests. Don't delete anything without asking me.")
+        assert d.decide("mcp__github__merge_pull_request", {"n": 1})[0] == "ask"
+
+    @pytest.mark.parametrize("cmd", ["python -m mypy src", "python3 -m pylint src", "python -m flake8"])
+    def test_checkers_are_plain_runs(self, repo, cmd):
+        d = Driver(repo)
+        d.say("Don't touch the tests. Don't delete anything without asking me. Only push after tests pass.")
+        assert d.bash(cmd, execute=False) == "allow"

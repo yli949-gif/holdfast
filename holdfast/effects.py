@@ -170,5 +170,9 @@ def effect_from_tool(tool_name: str, tool_input: dict, cwd: str, project_root: s
         # Subagent spawn: its own tool calls will be hooked individually.
         return [Effect("run", "subagent", kind="command", detail=t, certain=True)]
     if t.startswith("mcp__"):
+        # read-only by name (get_/list_/search_...): a lookup, not an action (REVIEW-2 O1); anything else is opaque
+        op = t.rsplit("__", 1)[-1].lower()
+        if re.match(r"^(?:get|list|search|read|fetch|query|describe|view|show|find|lookup|count|check|inspect|retrieve)(?:_|$)", op):
+            return [Effect("read", t, kind="command", detail=t)]
         return [Effect("exec_opaque", t, kind="opaque", detail=t, certain=False)]
     return []

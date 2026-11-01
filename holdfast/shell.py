@@ -32,6 +32,7 @@ import os
 import posixpath
 import re
 import shlex
+import subprocess
 import sys
 import warnings
 from dataclasses import dataclass, field, replace
@@ -1152,6 +1153,15 @@ def _h_mv(cmd, args, ctx, stdin, detail):
 def _h_cp(cmd, args, ctx, stdin, detail):
     if cmd == "rsync":
         return _h_rsync(args, ctx, detail)
+    if cmd == "cp" and any(a in ("--link", "--symbolic-link") or (a.startswith("-") and not a.startswith("--") and ("l" in a or "s" in a))
+                           for a in args):
+        # cp -l / -al / -s makes links, not copies: the sources become writable under the new names (REVIEW-2 B4)
+        effs = _ln([a for a in args if not (a.startswith("-") and not a.startswith("--") and set(a[1:]) <= set("alsrRfvpPdHLnuix"))
+                    and a not in ("--link", "--symbolic-link", "--recursive", "--archive")], ctx, detail)
+        if any("r" in a.lower() or a in ("-a", "--archive", "--recursive") for a in args if a.startswith("-")):
+            effs = [replace(e, target=(e.target.rstrip("/") + "/**") if e.action == "edit" and e.target not in (UNKNOWN, EVERYTHING) else e.target)
+                    for e in effs] + [e for e in effs if e.action == "edit"]
+        return effs
     vals = {"-t", "--target-directory", "-S", "--suffix"} | ({"-m", "--mode", "-o", "-g", "--owner", "--group"} if cmd == "install" else set())
     pos = _positionals(args, vals)
     tdir = _target_dir(args)
@@ -1850,8 +1860,17 @@ def _git_checkout(sub, rest, ctx, detail):
         return effs
     if any(a in ("-f", "--force") for a in rest) or (sub == "switch" and "--discard-changes" in rest):
         return [Effect("discard", EVERYTHING, detail=detail), Effect("run", detail, kind="command", detail=detail)]
-    if sub != "checkout" or any(a in ("-b", "-B", "--orphan", "-t", "--track", "--detach", "-p", "--patch") for a in rest):
+    if any(a in ("-p", "--patch", "--orphan") for a in rest):
         return [Effect("run", detail, kind="command", detail=detail)]
+    if sub != "checkout" or any(a in ("-b", "-B", "-c", "-C", "--create", "--force-create", "-t", "--track", "--detach") for a in rest):
+        # switching to another commit rewrites every path that differs from HEAD (REVIEW-2 B7)
+        vals = {"-b", "-B", "-c", "-C", "--create", "--force-create", "--conflict"}
+        pos = _positionals(rest, vals)
+        new_branch = any(a in vals for a in rest)
+        start = pos[0] if pos and new_branch else (pos[0] if pos and not new_branch else None)
+        if start is None:
+            return [Effect("run", detail, kind="command", detail=detail)]
+        return _tree_change(ctx, detail, [["diff", "--name-status", "HEAD", start]], fallback_run=True)
     rpos = _positionals(rest, {"--conflict", "--pathspec-from-file"})
     if len(rpos) >= 2:          # checkout <rev> <path>...: overwrites the paths with <rev>'s content
         paths = _pathify(_everything_or(rpos[1:], ctx), ctx)
@@ -1864,7 +1883,82 @@ def _git_checkout(sub, rest, ctx, detail):
         is_path = p0 in (".", "*") or (os.path.exists(ap) if (on_disk and ap) else ("/" in p0 or "." in p0))
         if is_path and not (on_disk and _looks_like_ref(p0, ctx) and not os.path.exists(ap or "")):
             return [Effect("discard", p, detail=detail, certain=False) for p in _pathify(_everything_or(rpos, ctx), ctx)]
+        return _tree_change(ctx, detail, [["diff", "--name-status", "HEAD", p0]], fallback_run=True)
     return [Effect("run", detail, kind="command", detail=detail)]
+
+
+def _git_out(ctx: Ctx, *a: str) -> str | None:
+    if not ctx.fs or not ctx.cwd_known or not ctx.cwd:
+        return None
+    try:
+        p = subprocess.run(["git", "-C", ctx.cwd, *a], capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout if p.returncode == 0 else None
+
+
+def _tree_change(ctx: Ctx, detail: str, diffs: list[list[str]], fallback_run: bool = False) -> list[Effect]:
+    """Paths a tree-rewriting git command (merge, rebase, cherry-pick, stash pop, checkout <branch>...) will change,
+    computed from git itself before it runs (REVIEW-2 B7). Unknown -> an uncertain edit of an unknown target."""
+    top = _git_out(ctx, "rev-parse", "--show-toplevel")
+    effs: list[Effect] = []
+    for d in diffs:
+        out = _git_out(ctx, *d) if top else None
+        if out is None:
+            if fallback_run:
+                return [Effect("run", detail, kind="command", detail=detail)]
+            return [Effect("edit", UNKNOWN, detail=detail + " (rewrites the working tree)", certain=False)]
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            st, paths = parts[0], parts[1:]
+            ab = [ctx.N(posixpath.join(top.strip(), x)) for x in paths]
+            if st.startswith("R"):
+                effs += [Effect("delete", ab[0], detail=detail), Effect("write", ab[-1], detail=detail)]
+            elif st.startswith("D"):
+                effs.append(Effect("delete", ab[0], detail=detail))
+            else:
+                effs.append(Effect("write", ab[0], detail=detail))
+    return effs or [Effect("run", detail, kind="command", detail=detail)]
+
+
+_CONTROL = {"--abort", "--quit", "--skip", "--continue", "--edit-todo", "--show-current-patch"}
+
+
+def _git_plumbing_tree(sub, rest, ctx, detail):
+    """read-tree -u / checkout-index -f|-a / worktree add: write the working tree from the index or a commit."""
+    if (sub == "read-tree" and any(a in ("-u", "--reset") for a in rest)) or \
+            (sub == "checkout-index" and any(a in ("-f", "--force", "-a", "--all") for a in rest)):
+        return [Effect("edit", UNKNOWN, detail=detail + " (rewrites the working tree)", certain=False)]
+    if sub == "worktree" and rest[:1] == ["add"]:
+        pos = _positionals(rest[1:], {"-b", "-B", "--reason"})
+        return [Effect("write", ctx.N(pos[0]) if pos else UNKNOWN, detail=detail)]
+    return [Effect("run", detail, kind="command", detail=detail)]
+
+
+def _git_merge_like(sub, rest, ctx, detail):
+    if any(a in _CONTROL for a in rest):
+        return [Effect("edit", UNKNOWN, detail=detail + " (rewrites the working tree)", certain=False)] if "--abort" in rest or "--skip" in rest \
+            else [Effect("run", detail, kind="command", detail=detail)]
+    vals = {"-m", "-s", "--strategy", "-X", "--strategy-option", "-F", "--file", "--onto", "--exec", "-x", "-S", "--gpg-sign",
+            "--mainline", "--cleanup", "--into-name"}
+    pos = _positionals(rest, vals)
+    if sub in ("cherry-pick", "revert"):
+        diffs = []
+        for c in pos or ["HEAD"]:
+            if ".." in c:
+                a, _, b = c.partition("...") if "..." in c else c.partition("..")
+                diffs.append(["diff", "--name-status", a or "HEAD", b or "HEAD"])
+            else:
+                diffs.append(["diff-tree", "-r", "--no-commit-id", "--name-status", "--root", c])
+        return _tree_change(ctx, detail, diffs)
+    onto = next((rest[k + 1] for k, a in enumerate(rest) if a == "--onto" and k + 1 < len(rest)), None)
+    up = onto or (pos[0] if pos else "@{u}")
+    effs = _tree_change(ctx, detail, [["diff", "--name-status", f"HEAD...{up}"]])
+    if sub == "rebase":
+        effs.append(Effect("history_rewrite", "HEAD", kind="branch", detail=detail))
+    return effs
 
 
 def _looks_like_ref(name: str, ctx: Ctx) -> bool:
@@ -1901,6 +1995,9 @@ def _git_stash(sub, rest, ctx, detail):
     rpos = _paths_after_opts(rest)
     if rpos[:1] in (["drop"], ["clear"]):
         return [Effect("discard", "stash", kind="branch", detail=detail)]
+    if rpos[:1] in (["pop"], ["apply"]):
+        ref = rpos[1] if len(rpos) > 1 else "stash@{0}"
+        return _tree_change(ctx, detail, [["stash", "show", "--name-status", "--include-untracked", ref]])
     return [Effect("run", detail, kind="command", detail=detail)]
 
 
@@ -1961,7 +2058,8 @@ def _git_network(sub, rest, ctx, detail):
     elif sub == "submodule" and rpos[:1] == ["add"] and len(rpos) >= 3:
         effs.append(Effect("write", ctx.N(rpos[2]), detail=detail))
     elif sub == "pull":
-        effs.append(Effect("run", detail, kind="command", detail=detail))
+        # merges/rebases remote content that is not known until it is fetched (REVIEW-2 B7)
+        effs.append(Effect("edit", UNKNOWN, detail=detail + " (merges fetched changes into the working tree)", certain=False))
     return effs
 
 
@@ -1997,7 +2095,9 @@ def _git_config(sub, rest, ctx, detail):
 
 _GIT_SUBS = {
     "push": _git_push, "reset": _git_reset, "checkout": _git_checkout, "switch": _git_checkout, "restore": _git_restore,
-    "clean": _git_clean, "branch": _git_branch, "tag": _git_branch, "stash": _git_stash, "rebase": _git_history,
+    "clean": _git_clean, "branch": _git_branch, "tag": _git_branch, "stash": _git_stash, "rebase": _git_merge_like,
+    "merge": _git_merge_like, "cherry-pick": _git_merge_like, "revert": _git_merge_like,
+    "read-tree": _git_plumbing_tree, "checkout-index": _git_plumbing_tree, "worktree": _git_plumbing_tree,
     "commit": _git_history, "filter-branch": _git_history, "filter-repo": _git_history, "rm": _git_rm, "mv": _git_mv,
     "apply": _git_apply, "am": _git_apply, "fetch": _git_network, "pull": _git_network, "clone": _git_network,
     "ls-remote": _git_network, "remote": _git_network, "submodule": _git_network, "lfs": _git_network,
@@ -2085,6 +2185,15 @@ def _h_gh(cmd, args, ctx, stdin, detail):
     effs = [Effect("network", "github.com", kind="url", detail=detail)]
     if sub == "pr" and args[1:2] == ["merge"]:
         effs.append(Effect("push", "origin/*", kind="branch", detail=detail, certain=False))
+    if sub == "api":
+        method = next((args[k + 1].upper() for k, a in enumerate(args) if a in ("-X", "--method") and k + 1 < len(args)), None)
+        method = method or next((a.split("=", 1)[1].upper() for a in args if a.startswith("--method=")), None)
+        if method is None and any(a in ("-f", "-F", "--field", "--raw-field", "--input") or a.startswith(("--field=", "--raw-field="))
+                                  for a in args):
+            method = "POST"
+        if method and method not in ("GET", "HEAD"):
+            # a REST mutation can merge PRs, move refs or write files on the remote (REVIEW-2 B8)
+            effs.append(Effect("push", "origin/*", kind="branch", detail=detail + f" ({method} via the GitHub API)", certain=False))
     if sub == "repo" and args[1:2] == ["clone"] and len(args) > 2:
         effs.append(Effect("write", ctx.N(args[3] if len(args) > 3 else args[2].rsplit("/", 1)[-1]), detail=detail))
     return effs
@@ -2461,6 +2570,47 @@ def _local_module(mod: str, ctx: Ctx, extra_dirs: tuple = ()) -> bool:
     return False
 
 
+MAX_IMPORT_FILES = 64
+_PY_CHECKERS = {"mypy", "pyright", "pylint", "flake8", "pyflakes", "pycodestyle", "pydocstyle", "bandit", "vulture", "radon",
+                "coverage", "pip_audit", "safety", "interrogate", "xenon"}
+
+
+def _module_files(mod: str, level: int, names: list[str], ctx: "Ctx", script_dir: str | None) -> list[str] | None:
+    """Source files a (project) import executes: the module (or package __init__) and imported submodules."""
+    parts = [p for p in mod.split(".") if p]
+    if level > 0:
+        if not script_dir:
+            return None
+        base = script_dir
+        for _ in range(level - 1):
+            base = posixpath.dirname(base)
+        bases = [base]
+    else:
+        bases = [d for d in ((ctx.cwd if ctx.cwd_known else None), ctx.root,
+                             (posixpath.join(ctx.root, "src") if ctx.root else None), script_dir) if d]
+    for b in dict.fromkeys(bases):
+        p = posixpath.join(b, *parts) if parts else b
+        out = []
+        if os.path.isfile(p + ".py"):
+            out.append(p + ".py")
+        elif os.path.isdir(p):
+            if os.path.isfile(posixpath.join(p, "__init__.py")):
+                out.append(posixpath.join(p, "__init__.py"))
+            out += [posixpath.join(p, n + ".py") for n in names if n != "*" and os.path.isfile(posixpath.join(p, n + ".py"))]
+            if not out and not parts:
+                continue
+        if out:
+            # also the parent packages' __init__ files, which run first
+            for k in range(1, len(parts)):
+                ini = posixpath.join(b, *parts[:k], "__init__.py")
+                if os.path.isfile(ini):
+                    out.insert(0, ini)
+            return out
+        if os.path.isdir(p):
+            return []                                  # namespace package, nothing executes
+    return None
+
+
 _PY_DELETE = {"os.remove", "os.unlink", "os.rmdir", "os.removedirs", "shutil.rmtree", "os.truncate", "send2trash.send2trash"}
 _PY_MOVE = {"os.rename", "os.replace", "shutil.move", "os.renames"}
 _PY_COPY = {"shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copytree", "shutil.copyfileobj"}
@@ -2578,18 +2728,57 @@ class _PyScan:
             e.detail = f"{self.detail} [{note}: {e.detail}]"
             self.effects.append(e)
 
+    def follow_import(self, mod: str, level: int, names: list[str]) -> None:
+        top = mod.split(".")[0] if mod else ""
+        if level == 0 and top == "holdfast":
+            self.add("edit", ".git/holdfast", note="imports Holdfast's own state/hook modules")
+            return
+        if level > 0 and not self.script_dir:
+            return                                    # `python -c 'from . import x'` raises before running anything
+        if level == 0 and not _local_module(mod, self.ctx, (self.script_dir,) if self.script_dir else ()):
+            return                                    # stdlib / installed third-party: not project code
+        files = _module_files(mod, level, names, self.ctx, self.script_dir)
+        if files is None:
+            self.add("exec_opaque", UNKNOWN, note=f"imports project module {'.' * level}{mod} (source not found)")
+            return
+        for f in files:
+            if f in self.ctx.seen:
+                continue
+            if len(self.ctx.seen) >= MAX_IMPORT_FILES:
+                self.add("exec_opaque", UNKNOWN, note=f"imports project module {mod} (import graph too large to scan)")
+                return
+            text = self.ctx.read_file(f)
+            sub = self.ctx.child(seen=self.ctx.seen | {f})
+            effs = _python_effects(text, sub, self.detail, script_dir=posixpath.dirname(f)) if text is not None else None
+            # the child ctx's seen set grows inside the recursion; carry it back so siblings are not rescanned
+            self.ctx.seen = sub.seen | self.ctx.seen
+            if effs is None:
+                self.add("exec_opaque", UNKNOWN, note=f"imports project module {mod} ({f} unreadable or not python)")
+                continue
+            for e in effs:
+                if e.action in ("run", "read"):
+                    continue
+                e.certain = False
+                e.detail = f"{e.detail} [via import of {posixpath.relpath(f, self.ctx.root) if self.ctx.root else f}]"
+                self.effects.append(e)
+
     # -- passes
     def collect(self) -> None:
         for node in ast.walk(self.tree):
             # Importing (project) modules and calling their functions is a plain run: only concrete
             # filesystem / subprocess / network / dynamic-exec calls in this code produce effects.
             # (A dotted module name is not a path; reporting it as an opaque target false-blocked real runs.)
+            # Project modules are not opaque either: their source is resolved and scanned (REVIEW-2 N6), so
+            # `python -c 'import src.fixup'` reports what src/fixup.py does.
             if isinstance(node, ast.Import):
                 for a in node.names:
                     self.aliases[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
-            elif isinstance(node, ast.ImportFrom) and node.module:
+                    self.follow_import(a.name, 0, [])
+            elif isinstance(node, ast.ImportFrom):
                 for a in node.names:
-                    self.aliases[a.asname or a.name] = f"{node.module}.{a.name}"
+                    if node.module:
+                        self.aliases[a.asname or a.name] = f"{node.module}.{a.name}"
+                self.follow_import(node.module or "", node.level, [a.name for a in node.names])
         for _ in range(2):   # two passes so that chained constants resolve
             for node in ast.walk(self.tree):
                 if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
@@ -2627,6 +2816,10 @@ class _PyScan:
         if q in _PY_MOVE and len(args) >= 2:
             self.add("move", self.N(self.const(args[0]) or self.path_of(args[0])), note=q)
             self.add("write", self.N(self.const(args[1]) or self.path_of(args[1])), note=q)
+            return
+        if q in ("os.link", "os.symlink") and len(args) >= 2:
+            self.add("write", self.N(self.const(args[1]) or self.path_of(args[1])), note=q)
+            self.add("edit", self.N(self.const(args[0]) or self.path_of(args[0])), note=f"{q}: the source becomes writable via the link")
             return
         if q in _PY_COPY and len(args) >= 2:
             self.add("write", self.N(self.const(args[1]) or self.path_of(args[1])), note=q)
@@ -2930,7 +3123,19 @@ def _interpreter(cmd, args, ctx, stdin, detail):
             return _classify_argv([module] + rest, ctx.child(depth=ctx.depth + 1), Stdin())[0]
         if module in ("json.tool", "pydoc", "this", "timeit", "py_compile", "compileall", "site", "platform", "sysconfig", "tokenize", "ast", "dis"):
             return [Effect("run", detail, kind="command", detail=detail)]
-        if _local_module(module, ctx) or module not in sys.stdlib_module_names:
+        if module.split(".")[0] in _PY_CHECKERS and not (module == "coverage" and rest[:1] != ["report"]):
+            return [Effect("run", detail, kind="command", detail=detail)]      # read-only checkers (O1)
+        if module.split(".")[0] == "holdfast":
+            return [Effect("edit", ".git/holdfast", detail=f"{detail} (runs Holdfast's own modules)")]
+        if _local_module(module, ctx):
+            files = _module_files(module, 0, [], ctx, None)
+            if files:
+                main = files[-1]
+                if main.endswith("__init__.py") and os.path.isfile(posixpath.join(posixpath.dirname(main), "__main__.py")):
+                    main = posixpath.join(posixpath.dirname(main), "__main__.py")
+                return _script_file(main, ctx, detail, lang="python")
+            return [_opaque(module, detail)]
+        if module not in sys.stdlib_module_names:
             return [_opaque(module, detail)]
         return [Effect("run", detail, kind="command", detail=detail)]
     if script is not None:
@@ -3007,12 +3212,15 @@ def _script_file(path: str, ctx: Ctx, detail: str, lang: str | None, share: bool
             continue
         e.detail = note + e.detail
         precise.append(e)
+    if lang in ("sh", "python") and not any(e.action == "exec_opaque" for e in body):
+        return precise          # fully analysed body: what it does is known, no blanket "could do anything" (O1)
     return precise + [opaque]
 
 
 # ----------------------------------------------------------------------------- handler table
 
 _HANDLERS = {
+    "link": lambda cmd, args, ctx, stdin, detail: _ln(args, ctx, detail),
     "rm": _h_delete, "unlink": _h_delete, "shred": _h_delete, "rmdir": _h_delete, "srm": _h_delete, "trash": _h_delete, "trash-put": _h_delete,
     "find": _h_find, "mv": _h_mv, "cp": _h_cp, "rsync": _h_cp, "install": _h_cp,
     "truncate": _h_truncate, "dd": _h_dd, "tee": _h_tee, "sed": _h_sed, "gsed": _h_sed,

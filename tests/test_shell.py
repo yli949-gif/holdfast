@@ -232,7 +232,8 @@ class TestGit:
 
     @pytest.mark.parametrize("cmd", ["git commit --amend", "git rebase -i HEAD~3", "git rebase main", "git filter-branch"])
     def test_history_rewrite(self, cmd):
-        assert acts(cmd) == ["history_rewrite"]
+        # rebase additionally reports the paths it rewrites (unknown here: no repository on disk, REVIEW-2 B7)
+        assert "history_rewrite" in acts(cmd) and set(acts(cmd)) <= {"history_rewrite", "edit"}
 
     @pytest.mark.parametrize("cmd", ["git add .", "git status", "git log", "git diff", "git stash", "git -C /x status"])
     def test_benign_git_is_run(self, cmd):
@@ -981,14 +982,17 @@ class TestFilesystemAware:
         for cmd in ("bash cleanup.sh", "sh ./cleanup.sh", "./cleanup.sh", "source cleanup.sh"):
             effs = fx(cmd, cwd=r, root=r)
             assert ("delete", "important.txt") in [(e.action, e.target) for e in effs], cmd
-            assert any(e.action == "exec_opaque" and not e.certain for e in effs), cmd
+            # fully analysed body: precise effects only, no blanket opaque (REVIEW-2 O1)
+            assert not any(e.action == "exec_opaque" for e in effs), cmd
 
     def test_python_script_contents_are_scanned(self, tmp_path):
         r = self._proj(tmp_path)
         (tmp_path / "purge.py").write_text("import shutil\nshutil.rmtree('data')\n")
         effs = fx("python3 purge.py", cwd=r, root=r)
         assert ("delete", "data") in [(e.action, e.target) for e in effs]
-        assert any(e.action == "exec_opaque" for e in effs)
+        assert not any(e.action == "exec_opaque" for e in effs)
+        (tmp_path / "dyn.py").write_text("import sys, subprocess\nsubprocess.run(sys.argv[1:])\n")
+        assert any(e.action == "exec_opaque" for e in fx("python3 dyn.py rm x", cwd=r, root=r))
 
     def test_makefile_recipe(self, tmp_path):
         r = self._proj(tmp_path)
