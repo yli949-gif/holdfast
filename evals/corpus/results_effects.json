@@ -5212,9 +5212,9 @@
      true
     ],
     [
-     "run",
-     "git pull",
-     true
+     "edit",
+     "<unknown>",
+     false
     ]
    ],
    "pairs": [

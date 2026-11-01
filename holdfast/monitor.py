@@ -62,6 +62,10 @@ _SELF_INVOKE = re.compile(r"holdfast[/.]hook\b|holdfast/(?:state|monitor|cli)\.p
                           r"|\b(?:import|from)\s+holdfast\b|__import__\(\s*['\"]holdfast|(?:^|[\s;&|(`'\"])holdfast\s+(?:install|uninstall)\b")
 
 
+_WHOLE_TREE = re.compile(r"(?:^|\s)['\"]?(?:\.{1,2}/?|/|~/?|\$HOME/?|\$\{HOME\}/?|\$PWD/?|\$\(pwd\)/?)['\"]?(?=\s|$|;|&|\|)")
+_FIND_FILTER = re.compile(r"\bfind\b.*\s-(?:i?name|i?path|i?regex|type|newer|mtime|mmin|size|empty|user|perm)\b")
+
+
 def _is_guard_file(target: str) -> bool:
     return target not in (UNKNOWN, EVERYTHING) and bool(_GUARD_FILES.search(target))
 
@@ -75,8 +79,9 @@ def _guard_hit(e: Effect, root: str | None, sdir: str | None) -> bool:
     if _is_guard_file(e.target):
         return True
     not_git = not re.match(r"\s*git\b", e.detail or "")
-    if e.target == EVERYTHING and e.action in ("delete", "move") and not_git:
-        return True             # `rm -rf .` / `rm -rf /`: the whole project, including the guard's state
+    if e.target == EVERYTHING and e.action in ("delete", "move") and not_git and _WHOLE_TREE.search(e.detail or "") \
+            and not _FIND_FILTER.search(e.detail or ""):
+        return True             # `rm -rf .` / `rm -rf /` / `rm -rf ~`: the whole project, including the guard's state
     if not sdir or e.target in (UNKNOWN, EVERYTHING) or "*" in e.target:
         return False
     t = e.target if e.target.startswith("/") else os.path.join(root or "/", e.target)
