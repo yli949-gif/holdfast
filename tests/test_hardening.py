@@ -224,3 +224,90 @@ class TestSelfProtection:
         d.say("never modify anything under tests/")
         assert d.bash("git config --get user.name") == "allow"
         assert d.bash("git config user.name") == "allow"
+
+
+# ------------------------------------------------------------------ N2 / N3 / N9: what a "yes" grants
+
+class TestConfirmationScope:
+    def test_yes_covers_only_the_asked_target(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("rm data.txt") == "deny"
+        d.say("yes")
+        assert d.bash("rm -rf src") == "deny"
+        assert (repo / "src").exists()
+        assert d.bash("rm data.txt") == "allow"
+        assert not (repo / "data.txt").exists()
+
+    def test_grant_expires_at_next_user_turn(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("rm important.txt") == "deny"
+        d.say("yes")
+        d.say("now please refactor src/a.py")
+        assert d.bash("rm important.txt") == "deny"
+        assert (repo / "important.txt").exists()
+
+    def test_grant_not_consumed_when_another_rule_denies(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me. never modify anything under tests/")
+        assert d.bash("rm data.txt && echo x > tests/test_a.py", execute=False) == "deny"
+        d.say("yes")
+        assert d.bash("rm data.txt && echo x > tests/test_a.py", execute=False) == "deny"
+        assert d.bash("rm data.txt") == "allow"
+
+    @pytest.mark.parametrize("reply", [
+        "ok now let's move on to the README",
+        "sure, I'll handle that file myself later. please continue with the refactor",
+        "ok, but first show me what is in it",
+        "ok 1 - parses config\nok 2 - handles empty\nnot ok 3 - fails on unicode\nwhy does test 3 fail?",
+        "yes?",
+        "ok wait",
+    ])
+    def test_non_affirmations_do_not_grant(self, repo, reply):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("rm data.txt") == "deny"
+        d.say(reply)
+        assert d.bash("rm data.txt") == "deny"
+        assert (repo / "data.txt").exists()
+
+    @pytest.mark.parametrize("reply", ["yes", "ok", "yes, delete it", "go ahead", "yes please", "sure, delete data.txt"])
+    def test_real_affirmations_grant(self, repo, reply):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("rm data.txt") == "deny"
+        d.say(reply)
+        assert d.bash("rm data.txt") == "allow"
+
+    @pytest.mark.parametrize("prompt", ["you can delete anything except src", "Feel free to delete anything that looks stale",
+                                        "you can remove src from the docs"])
+    def test_untargeted_or_vetoed_goahead_does_not_cover_src(self, repo, prompt):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        d.say(prompt)
+        assert d.bash("rm -rf src") == "deny"
+
+    def test_goahead_for_dir_is_prefix_only(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        (repo / "build").mkdir()
+        (repo / "src" / "build").mkdir()
+        d.say("go ahead and delete build")
+        assert d.bash("rm -rf src/build") == "deny"
+        assert d.bash("rm -rf build") == "allow"
+
+    def test_multi_target_call_confirmed_as_a_whole(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("rm data.txt run.py") == "deny"
+        d.say("yes, delete both")
+        assert d.bash("rm data.txt run.py") == "allow"
+        assert not (repo / "data.txt").exists() and not (repo / "run.py").exists()
+
+    def test_yes_delete_the_file_keeps_the_pending_grant(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("rm data.txt") == "deny"
+        d.say("yes, delete the file")
+        assert d.bash("rm data.txt") == "allow"

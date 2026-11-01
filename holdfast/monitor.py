@@ -143,6 +143,7 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
                         "builtin-integrity", effects)
 
     created = set(state.get("created", []))
+    to_consume: list[dict] = []
     for rule in rules:
         for e in effects:
             if e.action in ("delete", "move") and cfg.exempt_created and e.target in created and rule.action in ("delete", "modify", "destructive"):
@@ -186,16 +187,18 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
                     rule.kind = "confirm"  # fallthrough semantics
             if rule.kind == "confirm" and not uncertain and cand is None:
                 grant = state.get("confirmations", {}).get(rule.id)
-                if grant and not grant.get("consumed") and grant.get("target") and not _target_covers(grant["target"], e.target):
-                    grant = None   # user confirmed a different target ("go ahead and delete build/") — does not cover this one
-                if grant and (grant.get("mode") == "always" or not grant.get("consumed")):
+                if grant and _grant_covers(grant, e, state):
                     if grant.get("mode") != "always":
-                        grant["consumed"] = True
-                        grant["consumed_by"] = tool_use_id
-                    # explicitly allowed by user; continue checking other rules
+                        to_consume.append(grant)   # consumed only if the call as a whole is allowed (REVIEW-2 N2)
                     continue
-                state["pending_confirm"] = {"rule_id": rule.id, "effect": e.as_dict(), "tool_use_id": tool_use_id, "asked_at": now,
-                                            "tool_name": tool_name, "tool_input": tool_input}
+                pend = state.get("pending_confirm")
+                if pend and pend.get("tool_use_id") == tool_use_id and pend.get("rule_id") == rule.id and tool_use_id:
+                    if e.target not in pend.setdefault("targets", []):
+                        pend["targets"].append(e.target)
+                else:
+                    state["pending_confirm"] = {"rule_id": rule.id, "effect": e.as_dict(), "targets": [e.target],
+                                                "action": e.action, "tool_use_id": tool_use_id, "asked_at": now,
+                                                "turn": state.get("turn", 0), "tool_name": tool_name, "tool_input": tool_input}
                 how = cfg.confirm_via
                 cand = Decision(how, f"Holdfast rule {rule.id}: {rule.describe()} (user said: \"{rule.text}\"). "
                                      f"Effect {e.action} {e.target} needs explicit user confirmation. "
@@ -206,7 +209,26 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
                 best = cand
             if cand:
                 best.matched.append({"rule_id": rule.id, "effect": e.as_dict(), "decision": cand.decision, "uncertain": cand.uncertain})
+    if best.decision == "allow":
+        for g in to_consume:
+            g["consumed"] = True
+            g["consumed_by"] = tool_use_id
     return best
+
+
+def _grant_covers(grant: dict, e: Effect, state: dict) -> bool:
+    """A one-shot grant is valid only during the user turn it was given in, and only for the targets the user was
+    asked about (or named). An untargeted go-ahead never covers a delete (REVIEW-2 N2/N3)."""
+    if grant.get("mode") == "always":
+        return True
+    if grant.get("consumed"):
+        return False
+    if grant.get("turn") is not None and grant["turn"] != state.get("turn"):
+        return False
+    targets = [t for t in (grant.get("targets") or ([grant["target"]] if grant.get("target") else [])) if t]
+    if not targets:
+        return e.action not in ("delete", "move", "discard", "destructive")
+    return any(_target_covers(t, e.target) for t in targets)
 
 
 def observe_post(tool_name: str, tool_input: dict, tool_response: dict | str, state: dict, cwd: str, root: str | None) -> dict:
@@ -282,10 +304,15 @@ def register_rules(state: dict, new_rules: list[Rule]) -> list[Rule]:
 
 
 def _target_covers(granted: str, target: str) -> bool:
-    """Does a confirmation granted for `granted` cover an effect on `target`? (same path or inside the granted dir)"""
-    g = granted.strip("/").lower()
-    t = target.strip("/").lower()
-    return t == g or t.startswith(g + "/") or t.endswith("/" + g) or ("/" + g + "/") in ("/" + t + "/")
+    """Does a confirmation granted for `granted` cover an effect on `target`? Same path or inside it — prefix only
+    (a go-ahead for `build` does not cover `src/build`, REVIEW-2 N3)."""
+    g = granted.strip().strip("/").lower()
+    t = target.strip().strip("/").lower()
+    if g in ("", "."):
+        return False
+    if g.startswith("./"):
+        g = g[2:]
+    return t == g or t.startswith(g + "/")
 
 
 # explicit go-ahead for an action class that is under a confirm rule: "yes, delete build/", "go ahead and push"
@@ -295,7 +322,20 @@ _GOAHEAD = re.compile(r"\b(?:go ahead(?: and)?|yes,?(?: please)?|please|ok(?:ay)
 _VERB_ACTION = {"delete": "delete", "remove": "delete", "rm": "delete", "wipe": "delete", "drop": "delete", "push": "push",
                 "force push": "force_push", "force-push": "force_push", "forcepush": "force_push", "install": "install",
                 "deploy": "deploy", "commit": "commit", "run": "run", "modify": "modify", "edit": "modify", "change": "modify"}
-_NOISE_TARGETS = {"it", "them", "that", "those", "this", "anything", "everything", "the", "a", "now", "please", "yes"}
+_NOISE_TARGETS = {"it", "them", "that", "those", "this", "anything", "everything", "the", "a", "an", "now", "please", "yes",
+                  "file", "files", "both", "all", "to", "dir", "directory", "folder", "stuff", "things", "everything", "one", "ones"}
+# words that turn "ok ..." into something other than a go-ahead ("ok, but first show me", "sure, I'll do it myself later")
+_AFFIRM_VETO = re.compile(r"\b(?:but|first|later|myself|except|instead|not|don't|dont|do not|wait|hold|before|after|show|"
+                          r"what|why|how|which|tell|explain|move on|let's|lets|anyway|however|unless|if)\b|\?", re.I)
+_GOAHEAD_VETO = re.compile(r"\b(?:except|but not|other than|apart from|besides|without|unless|never|don't|do not|not)\b|\?", re.I)
+
+
+def is_affirmation(p: str) -> bool:
+    """A reply that grants a pending confirmation: a short, single-line, unhedged yes."""
+    p = p.strip()
+    if not p or "\n" in p or len(p.split()) > 8 or not AFFIRM.match(p) or _RETRACT.match(p):
+        return False
+    return not _AFFIRM_VETO.search(p)
 
 
 def _expire_holds(state: dict, prompt: str) -> list[str]:
@@ -333,8 +373,10 @@ def handle_prompt(prompt: str, state: dict, cfg: Config) -> dict:
 
     pending = state.get("pending_confirm")
     if pending:
-        if AFFIRM.match(p) and not _RETRACT.match(p):
-            state.setdefault("confirmations", {})[pending["rule_id"]] = {"granted_at": time.time(), "consumed": False, "mode": "once", "turn": state["turn"]}
+        if is_affirmation(p):
+            state.setdefault("confirmations", {})[pending["rule_id"]] = {
+                "granted_at": time.time(), "consumed": False, "mode": "once", "turn": state["turn"], "via": "reply",
+                "targets": list(pending.get("targets") or [pending["effect"]["target"]])}
             out["granted"] = pending
             state["pending_confirm"] = None
         elif NEGATE.match(p):
@@ -346,13 +388,28 @@ def handle_prompt(prompt: str, state: dict, cfg: Config) -> dict:
         act = _VERB_ACTION.get(m.group(1).lower().replace("-", " "), None)
         if not act:
             continue
-        tgt = (m.group(2) or "").strip("`\"' ")
+        # the rest of the clause can take the go-ahead back: "you can delete anything except src",
+        # "you can remove src from the docs"
+        clause = re.split(r"[.;!\n]", p[m.start():], maxsplit=1)[0]
+        if _GOAHEAD_VETO.search(clause) or re.match(r"\s+from\b", p[m.end():]):
+            continue
+        tgt = (m.group(2) or "").strip("`\"' ").rstrip(".,")
         if tgt.lower() in _NOISE_TARGETS:
             tgt = ""
+        if not tgt and act in ("delete", "move"):
+            continue                   # never an untargeted go-ahead for destruction
         for r in state.get("rules", []):
+            if out["granted"] and r["id"] == out["granted"]["rule_id"] and action_matches(r["action"], act):
+                # a fresh reply-grant for the pending call is extended, never replaced ("yes, delete the file")
+                g = state["confirmations"][r["id"]]
+                if tgt and tgt not in g["targets"]:
+                    g["targets"].append(tgt)
+                out["goahead"].append({"rule_id": r["id"], "action": act, "target": tgt})
+                continue
             if r.get("active", True) and r.get("kind") == "confirm" and action_matches(r["action"], act):
                 state.setdefault("confirmations", {})[r["id"]] = {"granted_at": time.time(), "consumed": False, "mode": "once",
-                                                                  "turn": state["turn"], "target": tgt, "via": "goahead"}
+                                                                  "turn": state["turn"], "target": tgt,
+                                                                  "targets": [tgt] if tgt else [], "via": "goahead"}
                 out["goahead"].append({"rule_id": r["id"], "action": act, "target": tgt})
 
     rules = extract_rules(p, source="user", turn=state["turn"])
