@@ -16,6 +16,7 @@ NEGATE = re.compile(r"^\s*(?:no|nope|don't|do not|stop|cancel|abort|never ?mind|
 _RETRACT = re.compile(r"^\s*\w+[,!.]?\s+(?:wait|no|nope|don't|do not|hold on|stop|not yet|actually no|never mind)\b", re.I)
 
 DROP = re.compile(r"holdfast:?\s*(?:drop|remove|delete|disable)\s+(?:rule\s+)?(R-[0-9a-f]{6})", re.I)
+RESET = re.compile(r"holdfast:?\s*reset\b", re.I)
 LIST = re.compile(r"holdfast:?\s*(?:list|rules|status)\b", re.I)
 
 
@@ -52,12 +53,50 @@ class Decision:
 
 RANK = {"allow": 0, "ask": 1, "deny": 2}
 
-_GUARD_FILES = re.compile(r"(?:^|/)(?:\.holdfast(?:/|$)|\.claude/settings(?:\.local)?\.json$|\.claude/hooks(?:/|$))")
+_GUARD_FILES = re.compile(r"(?:^|/)(?:\.holdfast(?:/|$)|\.claude/settings(?:\.local)?\.json$|\.claude/hooks(?:/|$)"
+                          r"|\.git/holdfast(?:/|$)|\.git/hooks(?:/|$)|\.git/config$|\.git/info/attributes$)")
 _ARTIFACTS = re.compile(r"(?:^|/)(?:__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.tox|\.nox|node_modules/\.cache|\.cache)(?:/|$)|\.py[co]$")
+_MUTATE = ("edit", "write", "delete", "discard", "move")
+# the agent driving Holdfast's own entry points (hook, state store, installer) could confirm or drop its own rules
+_SELF_INVOKE = re.compile(r"holdfast[/.]hook\b|holdfast/(?:state|monitor|cli)\.py|-m\s*holdfast\b"
+                          r"|\b(?:import|from)\s+holdfast\b|__import__\(\s*['\"]holdfast|(?:^|[\s;&|(`'\"])holdfast\s+(?:install|uninstall)\b")
 
 
 def _is_guard_file(target: str) -> bool:
-    return target not in (UNKNOWN,) and bool(_GUARD_FILES.search(target)) or target == EVERYTHING and False
+    return target not in (UNKNOWN, EVERYTHING) and bool(_GUARD_FILES.search(target))
+
+
+def _guard_hit(e: Effect, root: str | None, sdir: str | None) -> bool:
+    """Does a mutating effect touch the guard's state, its hook configuration, or a git code-execution channel?
+    Pattern match on the normalised target, plus a real-path check against wherever the state actually lives
+    (HOLDFAST_DIR outside the project, REVIEW-2 N11) and against its ancestors for deletes/moves."""
+    if e.action not in _MUTATE or e.kind not in ("path", "opaque"):
+        return False
+    if _is_guard_file(e.target):
+        return True
+    not_git = not re.match(r"\s*git\b", e.detail or "")
+    if e.target == EVERYTHING and e.action in ("delete", "move") and not_git:
+        return True             # `rm -rf .` / `rm -rf /`: the whole project, including the guard's state
+    if not sdir or e.target in (UNKNOWN, EVERYTHING) or "*" in e.target:
+        return False
+    t = e.target if e.target.startswith("/") else os.path.join(root or "/", e.target)
+    try:
+        real = os.path.realpath(os.path.expanduser(t))
+    except (OSError, ValueError):
+        return False
+    if real == sdir or real.startswith(sdir + os.sep):
+        return True
+    # deleting/moving an ancestor (`rm -rf .`, `mv .git /tmp`) takes the state with it; git's own commands never
+    # touch the git directory (`git clean -fdx` on "." is not an attack on .git/holdfast)
+    return e.action in ("delete", "move", "discard") and sdir.startswith(real.rstrip(os.sep) + os.sep) and not_git
+
+
+def _state_dir_real(root: str | None) -> str | None:
+    try:
+        from .state import state_dir
+        return os.path.realpath(state_dir(root, create=False))
+    except OSError:
+        return None
 
 
 def _is_artifact(target: str) -> bool:
@@ -86,14 +125,22 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
 
     # Built-in: the guard's own state and the hook configuration are never writable by the agent while Holdfast
     # is installed (REVIEW.md critical: `echo {} > .holdfast/sessions/<sid>.json` emptied every rule).
+    sdir = _state_dir_real(root)
     for e in effects:
-        if e.action in ("edit", "write", "delete", "discard", "move") and _is_guard_file(e.target):
-            return Decision("deny", f"Holdfast: {e.action} on {e.target} is blocked — the guard's own state and hook "
-                                    "configuration are read-only for the agent. Ask the user to change Holdfast settings.",
+        if _guard_hit(e, root, sdir):
+            return Decision("deny", f"Holdfast: {e.action} on {e.target} is blocked — the guard's own state, hook "
+                                    "configuration and git hook/config files are read-only for the agent. "
+                                    "Ask the user to change them.",
                             "builtin-selfprotect", effects, matched=[{"rule_id": "builtin-selfprotect", "effect": e.as_dict(),
                                                                        "decision": "deny", "uncertain": False}])
-        if e.action in ("edit", "write") and e.target == EVERYTHING:
-            pass
+    if tool_name == "Bash" and _SELF_INVOKE.search(tool_input.get("command", "") or ""):
+        return Decision("deny", "Holdfast: running Holdfast's own hook, state store or installer from a tool call is "
+                                "blocked — only the user can change rules or confirmations.", "builtin-selfprotect", effects)
+    if state.get("integrity_lost") and any(e.action not in ("read", "run", "test") for e in effects):
+        return Decision("deny", "Holdfast: this session's guard state was lost or corrupted "
+                                f"({state['integrity_lost']}), so its constraints cannot be verified. Mutating calls are "
+                                "blocked until the user re-states their constraints and says 'holdfast: reset'.",
+                        "builtin-integrity", effects)
 
     created = set(state.get("created", []))
     for rule in rules:
@@ -281,6 +328,8 @@ def handle_prompt(prompt: str, state: dict, cfg: Config) -> dict:
                 out["dropped"].append(rid)
     if LIST.search(p):
         out["listed"] = True
+    if RESET.search(p) and state.get("integrity_lost"):
+        state["integrity_reset"] = state.pop("integrity_lost")
 
     pending = state.get("pending_confirm")
     if pending:

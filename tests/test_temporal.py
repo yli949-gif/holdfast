@@ -201,7 +201,7 @@ class TestStateRobustness:
         store.path.write_text("{garbage")
         with store.locked() as st:
             assert len(st["rules"]) == 1 and st["errors"] == 1
-        assert list((root / ".holdfast" / "sessions").glob("sid.corrupt.*.json"))
+        assert list((root / ".git" / "holdfast" / "sessions").glob("sid.corrupt.*.json"))
 
     def test_cd_into_subdirectory_keeps_the_same_state(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)

@@ -1731,6 +1731,10 @@ def _h_git(cmd, args, ctx, stdin, detail):
             continue
         if a == "-c" and i + 1 < len(args):
             kv = args[i + 1]
+            if "=" in kv and not kv.lower().startswith("alias."):
+                hit = _git_exec_key_effect(kv, detail)
+                if hit:
+                    return hit
             if kv.lower().startswith("alias.") and "=" in kv:
                 n, _, v = kv[6:].partition("=")
                 gctx = gctx.child() if gctx is ctx else gctx
@@ -1961,8 +1965,31 @@ def _git_network(sub, rest, ctx, detail):
     return effs
 
 
+# git config keys whose value git later executes as a program (hooks, filters, drivers, pagers, editors...)
+_GIT_EXEC_KEYS = re.compile(r"^(?:core\.(?:hookspath|fsmonitor|sshcommand|editor|pager|askpass|gitproxy)|sequence\.editor"
+                            r"|filter\..+\.(?:clean|smudge|process)|diff\..+\.(?:textconv|command)|merge\..+\.driver"
+                            r"|credential\.helper|gpg\.program|gpg\..+\.program|pager\..+|alias\..+|include\.path|includeif\..+\.path"
+                            r"|uploadpack\.packobjectshook|remote\..+\.(?:uploadpack|receivepack)|protocol\..+\.allow)$", re.I)
+
+
+def _git_exec_key_effect(key: str, detail: str) -> list[Effect]:
+    if key.lower().startswith("alias.") and not key.split("=", 1)[-1].lstrip().startswith("!") and "=" in key:
+        return []
+    if _GIT_EXEC_KEYS.match(key.split("=", 1)[0].strip()):
+        return [Effect("edit", ".git/config", detail=f"{detail} (sets {key.split('=', 1)[0]}: git will execute its value)")]
+    return []
+
+
 def _git_config(sub, rest, ctx, detail):
     rpos = _paths_after_opts(rest)
+    getters = {"--get", "--get-all", "--get-regexp", "-l", "--list", "--unset", "--unset-all", "--show-origin",
+               "--get-urlmatch", "--remove-section", "--rename-section"}
+    if rpos and not any(a in getters for a in rest) and (len(rpos) >= 2 or "--add" in rest or "--replace-all" in rest):
+        key = rpos[0]
+        if not (key.lower().startswith("alias.") and not " ".join(rpos[1:]).lstrip().startswith("!")):
+            effs = _git_exec_key_effect(key + "=", detail)
+            if effs:
+                return effs
     if rpos and rpos[0].lower().startswith("alias.") and len(rpos) >= 2:
         ctx.git_aliases[rpos[0][6:]] = " ".join(rpos[1:])
     return [Effect("run", detail, kind="command", detail=detail)]

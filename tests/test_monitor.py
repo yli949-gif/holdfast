@@ -63,7 +63,7 @@ class TestForbid:
         for cmd in ("bash -c 'rm data/x'", "rm -rf .", "git clean -fdx", "eval rm data/x", "ls\nrm data/x",
                     "sudo -u root rm data/x", "python -c \"import os; os.remove('data/x')\"", "find data -delete"):
             d = ev(*bash(cmd), st)
-            assert d.decision in ("deny", "ask") and d.rule_id == "R-del001", cmd
+            assert d.decision in ("deny", "ask") and d.rule_id in ("R-del001", "builtin-selfprotect"), cmd
         # certain bypasses are hard denies
         for cmd in ("bash -c 'rm data/x'", "rm -rf .", "git clean -fdx", "eval rm data/x", "ls\nrm data/x", "sudo -u root rm data/x"):
             assert ev(*bash(cmd), st).decision == "deny", cmd
@@ -84,7 +84,11 @@ class TestForbid:
         assert ev(*bash("git push origin feature"), st).decision == "allow"
 
     def test_no_rules_allows_everything(self):
-        assert ev(*bash("rm -rf /"), default_state()).decision == "allow"
+        assert ev(*bash("rm -rf build data"), default_state()).decision == "allow"
+
+    def test_whole_project_delete_is_builtin_denied(self):
+        # deleting the whole tree also deletes the guard's state (REVIEW-2 N1)
+        assert ev(*bash("rm -rf /"), default_state()).rule_id == "builtin-selfprotect"
 
 
 # ---------------------------------------------------------------- confirm
