@@ -560,3 +560,10 @@ class TestClassifierGaps:
         d = Driver(repo)
         d.say("Don't touch the tests. Don't delete anything without asking me. Only push after tests pass.")
         assert d.bash(cmd, execute=False) == "allow"
+
+
+def test_push_request_lifts_universal_hold(repo):
+    d = Driver(repo)
+    d.say("Don't change anything yet, just look around.")
+    d.say("I committed a feature locally. Push my main branch to origin; merge if needed.")
+    assert d.tool("Edit", {"file_path": str(repo / "src/a.py")}) == "allow"

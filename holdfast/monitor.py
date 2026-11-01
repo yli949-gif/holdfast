@@ -368,7 +368,8 @@ _PROCEED = re.compile(r"\b(?:go ahead|proceed|do it|go for it|implement (?:it|th
                       r"you can (?:now )?(?:start|go|proceed|edit|change|implement|make))\b", re.I)
 _WORK = re.compile(r"^\s*(?:(?:now|ok(?:ay)?|great|thanks|alright|cool|good|also|and|then|next|so)[,.!]?\s+)*(?:please\s+)?"
                    r"(?:fix|add|implement|change|update|refactor|make|create|write|edit|remove|delete|tidy|clean|rename|move|build|"
-                   r"set up|install|bump|replace|convert|migrate|port|improve|optimi[sz]e|get rid|modify|patch|rewrite|split|merge)\b",
+                   r"set up|install|bump|replace|convert|migrate|port|improve|optimi[sz]e|get rid|modify|patch|rewrite|split|merge|"
+                   r"push|commit|rebase|deploy|publish|ship|revert|restore|upgrade|resolve)\b",
                    re.I)
 _UNTIL_EXPLICIT = re.compile(r"\buntil\s+(?:i|we|you get my|after i)\b|\buntil\s+(?:approved|reviewed|confirmed|signed)|\bwait for (?:my|me)",
                              re.I)
