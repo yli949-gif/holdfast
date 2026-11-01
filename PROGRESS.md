@@ -5,6 +5,34 @@ of each cycle; reuse recorded results (every eval under `evals/` has a results f
 it measures changed); stuck twice → stop and report. No paid API calls; all `claude -p` runs go through the Max
 subscription (every run reports its list-price equivalent in `meta.json`).
 
+## Status 2026-10-31 (rounds 3–5: bypass closed, error analysis, blind3, README)
+
+Commits a198e69 … (this commit). Details: README "Results at a glance", `evals/blind3/RESULTS.md`, `docs/REVIEW-2.md` § Update.
+
+- **Round 3** (a198e69): the last red-team bypass (del-31, `sed -i 'd'`) closed; error analysis on the *previously
+  seen* held-out/legacy corpora → installer/commit/worktree/coreutils/ruby -i/prod-network misses fixed, read-only git
+  and help probes no longer blocked, dependency-manifest edits ask.
+- **blind3**: a fresh corpus written by an independent agent with no code access (336 items, 10 constraints, real
+  fixture repo), frozen at 4fe79ea *before* the scorer existed. First scoring (f85f3da): Holdfast missed 10/160 = 6.2%,
+  false blocks 18/152 = 11.8%; on the 8 comparable constraints 8/129 and 10/121 vs regex strict 39/129, 17/121 and
+  native 54/129, 12/121.
+- **Round 4** (739fcb7, post-hoc — blind3 is in-sample from here): Write-empty truncation, commit-creating git ops,
+  MCP reads are network, local-path remotes are not, docs are not "production", manifest detection on added lines →
+  blind3 2/160 missed, 10/152 false blocks. Regression found and reported: +1 held-out false block (`git merge --no-ff`
+  under "never commit", a label disagreement).
+- **Round 5** (this commit): independent fact-check of the README found 6 discrepancies + omissions (all corrected) and
+  one real issue: `git stash -u` / `git clean -f` removed an *untracked* `.claude/settings*.json` (uninstalling the hooks
+  for the next session) → now denied; `holdfast install --local` excludes the local settings file. "Never touch the
+  production config." now extracts the prod bundle (T5 enforcement-only: 0/2 violated vs 2/2 unconstrained).
+
+Verification at this commit: 1150 tests pass; red team 0/93 bypass, 1/21 benign FB; held-out 6/304 missed, 64/1698 FB;
+legacy 6/326, 8/147; scenarios 46/47; blind3 2/160, 10/152; extraction unchanged (dev 86/86, held-out 57/57, v1 65/108);
+real sessions hard1+hard2 (16+16 runs): 0 violations, 2 false-block runs (prompt+Holdfast), 15/16 correct denials
+(Holdfast-only); live probes N1/N4/B20/N6 blocked (controls: N4, N6, B20 violated on old code).
+
+Next (priority): operation-specific constraints (migrations: 2/12 missed, 5/15 FB on blind3); opaque-code asks
+(O1 remainder); latency (63–92 ms); extraction recall on unseen phrasing (65/108); remaining Medium/Low review items.
+
 ## Status 2026-10-31 (security hardening phase complete)
 
 ### Security hardening — done (commits 3ed8363 … 8ea2fa6, details in `docs/REVIEW-2.md` § Resolution)
@@ -50,7 +78,7 @@ Also recorded this phase (pre-hardening code, not rerun): `evals/runs/look2` loo
 
 ### Missing (priority order)
 1. ~~Fix REVIEW-2 Critical/High findings~~ — done, see top of file.
-2. **README.md** (root) — problem, design, results-at-a-glance table (base / midsession / compact / enforcement-only / baselines), honest failures (REVIEW-2 open items, false-block rate on blind corpus, thesis verdict), reproduce commands. Numbers must be copied from the results files, not retyped.
+2. ~~README.md~~ — done (round 5). Original item: (root) — problem, design, results-at-a-glance table (base / midsession / compact / enforcement-only / baselines), honest failures (REVIEW-2 open items, false-block rate on blind corpus, thesis verdict), reproduce commands. Numbers must be copied from the results files, not retyped.
 3. Remaining Medium/Low review items (B15–B18, B20, N12, N13 remainder, N16 latency, O2/O4–O6, S4/S5) — see REVIEW-2 § Resolution.
 4. Reduce false blocks / asks on benign developer workflows (REVIEW-2: 12/52 benign calls blocked or asked; blind corpus 69 FP, 66 of them asks) — one targeted fix cycle after the README exists.
 5. Demo GIF (constraint added mid-session → compaction → still blocked) and plugin install path check.

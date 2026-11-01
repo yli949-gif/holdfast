@@ -41267,16 +41267,16 @@
  },
  "latency": {
   "inproc_median_ms": {
-   "holdfast": 0.17450799987273058,
-   "regex_strict": 0.004105000016352278,
-   "regex_lenient": 0.0014679999367217533,
-   "native": 0.16929800017351226
+   "holdfast": 0.16638199986118707,
+   "regex_strict": 0.004222999905323377,
+   "regex_lenient": 0.001505999989603879,
+   "native": 0.16414400033681886
   },
   "inproc_p95_ms": {
-   "holdfast": 2.1801919999688835,
-   "regex_strict": 0.01556999995955266,
-   "regex_lenient": 0.006062000011297641,
-   "native": 1.8068479998873954
+   "holdfast": 2.1917469998697925,
+   "regex_strict": 0.015444000382558443,
+   "regex_lenient": 0.005906999831495341,
+   "native": 1.8050860003313574
   },
   "inproc_n": {
    "holdfast": 2475,
@@ -41284,8 +41284,8 @@
    "regex_lenient": 2589,
    "native": 2589
   },
-  "holdfast_hook_subprocess_median_ms": 92.01379149999411,
-  "python_hook_floor_ms": 28.09374999992542
+  "holdfast_hook_subprocess_median_ms": 89.49794199997996,
+  "python_hook_floor_ms": 31.066477999956987
  },
  "holdfast_missed_but_regex_strict_blocked": {
   "heldout": [

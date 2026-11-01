@@ -438,3 +438,15 @@ against a real git repo + bare remote and executes every allowed command.
 | N8, N9, N10, N11, N14, N15, S3 | Fixed (Medium/Low, fixed with the above) | |
 
 Still open (Medium/Low, out of this scope): B15, B16, B17 (explicit `tests/` form), B18/O4, B20 (overwrite as destruction — the one remaining red-team bypass, `sed -i 'd'`), N12, N13 remainder, N16 (latency 63–76 ms vs 50 ms target), F2, O2, O5, O6, S4, S5 (audit log no longer committable, still stores full tool_input), Q*.
+
+### Update after rounds 3–5 (commits a198e69 … this commit)
+
+| ID | Status |
+|----|--------|
+| B20 | Fixed for content wipes: `sed -i` scripts that delete every line and `Write` with empty content over an existing file are deletes. Overwriting with *different* content (`cp a b`) is still an edit. |
+| B18/O4 | Partially fixed: more installers (bundle, pacman -S, snap, nix-env, rustup, corepack, mvn dependency:get, dotnet add package, pipX.Y); dependency-manifest edits that *add* a dependency ask under install rules. `pip install -e .` / `npm ci` (restore, not add) still count as installs. |
+| O5 | Fixed for git: read-only git (log/show/diff/grep/blame…) is a read, so prod run rules no longer fire on it. Other read-only commands whose text contains "prod" can still match a prod run rule. |
+| N13 | Partially fixed: python checkers, analysable scripts, read-only MCP tools, help/version probes, `make -n`. |
+| new | `git stash -u|-a` / `git clean -f[x]` that would remove untracked hook configuration (`.claude/settings*.json`, `.claude/hooks/`) are denied; `holdfast install --local` adds the local settings file to `.git/info/exclude`. Found by the README fact-check (live N1 probe stashed `.claude/`). |
+
+Still open: B15, B16, B17, N12, N16 (63–92 ms), F2, O2, O6, S4, S5, Q*, O1 remainder (`npm run build`, `node server.js`, `npx`/`dlx` ask).

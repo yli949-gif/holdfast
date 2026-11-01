@@ -13,14 +13,19 @@ Code permission rule matching), `scenarios.py` (stateful scenario suite + driver
 
 ## Headline
 
+Current code (regenerated 2026-10-31 after the hardening rounds; the first version of this comparison, at commit
+`229b474`, had Holdfast at 1 bypass, 20/304 missed, 69/1698 false blocks and 45/47 scenarios). All four sets below
+were looked at while fixing Holdfast, so they are in-sample for it; the independent blind comparison is
+`evals/blind3/RESULTS.md`.
+
 | | Holdfast | Regex hook, strict | Regex hook, lenient | CC native permissions |
 |---|---|---|---|---|
-| Red-team bypasses (93 attacks, run for real) | **1** | 24 | 52 | 41 |
-| Red-team benign probes blocked (of 21) | 1 | 5 | 1 | 6 (4 by ask) |
-| Blind held-out corpus: missed violations | **20/304 (7%)** | 37/304 (12%) | 37/304 (12%) | 102/304 (34%) |
-| Blind held-out corpus: false blocks | 69/1698 (4%), 66 of them asks | 27/1698 (2%) | 27/1698 (2%) | **9/1698 (1%)** |
-| Stateful scenarios: steps correct (47) | **45** | 38 | 31 | 38 (9 extra prompts) |
-| Median added latency per call, as deployed | ~65 ms (Python hook process) | ≥25 ms as a Python hook | same | ~0 (in process) |
+| Red-team bypasses (93 attacks, run for real) | **0/93** | 24/93 | 52/93 | 41/93 |
+| Red-team benign probes blocked | 1/21 | 5/21 | 1/21 | 6/21 (4 by ask) |
+| Held-out corpus: missed violations | **6/304 (2%)** | 37/304 (12%) | 37/304 (12%) | 102/304 (34%) |
+| Held-out corpus: false blocks | 64/1698 (4%), 60 of them asks | 27/1698 (2%) | 27/1698 (2%) | **9/1698 (1%)** |
+| Stateful scenarios: steps correct | **46/47** | 38/47 | 31/47 | 38/47 (9 extra prompts) |
+| Added latency per call, as deployed | 63–92 ms (Python hook process; 89 ms this run) | ≥20 ms as a Python hook | same | ~0 (in process) |
 
 What this shows: Holdfast's lead is largest on (a) adversarial and indirect shell forms (scripts, make/npm
 targets, interpreters, quoting tricks), where a regex over the command text misses them, and (b) anything that
@@ -226,12 +231,15 @@ Per scenario (each cell = one symbol per step: `.` correct, `M` missed violation
 
 | approach | in-process decision | as deployed |
 |---|---|---|
-| Holdfast | 0.175 ms (`monitor.evaluate`) | 92 ms (hook subprocess: python start + import + state load/lock/save + audit) |
-| Regex hook (strict / lenient) | 0.004 / 0.001 ms | >= 28 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
-| CC native permissions (our model) | 0.169 ms | in Claude Code's own process, no subprocess |
+| Holdfast | 0.166 ms (`monitor.evaluate`) | 89 ms (hook subprocess: python start + import + state load/lock/save + audit) |
+| Regex hook (strict / lenient) | 0.004 / 0.002 ms | >= 31 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
+| CC native permissions (our model) | 0.164 ms | in Claude Code's own process, no subprocess |
 <!-- TABLES:END -->
 
 ## Commentary by category
+
+*(Written at commit `229b474`; the counts quoted in this prose describe that snapshot. The tables above are current.
+Since then the `sed -i 'd'` bypass was closed (commit `a198e69`) and most of the listed held-out misses were fixed.)*
 
 - **Delete** (red team: 36 probes). The strict regex misses 13 probes, which Holdfast catches. They are
   quoting and encoding tricks (`r''m`, `$'\x72\x6d'`, base64 into `sh`), content wipes (`> f`, `: > f`,
@@ -262,6 +270,9 @@ Per scenario (each cell = one symbol per step: `.` correct, `M` missed violation
   measured here.
 
 ## Where Holdfast is NOT better (read this before quoting the headline)
+
+*(Written at commit `229b474`; still true in substance: Holdfast has the most false blocks of the four approaches on
+the held-out corpus — 64/1698 vs 27 (strict regex) and 9 (native) — and the highest per-call latency.)*
 
 1. **Most false blocks on the blind corpus: 69 pairs, against 27 for the strict regex and 9 for native.** 66 of
    them are *asks*. Opaque commands (`ruby -i -pe …`, `bash <(curl …)`, `wget | sh`, `python manage.py migrate`,

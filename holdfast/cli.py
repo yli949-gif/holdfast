@@ -46,6 +46,13 @@ def cmd_install(a):
         lst[:] = [b for b in lst if "holdfast" not in json.dumps(b)]
         lst.extend(blocks)
     json.dump(existing, open(target, "w"), indent=2)
+    if a.local:
+        # keep the local hook config out of `git stash -u` / `git clean -fd` (they only take ignored files with -a / -x)
+        exclude = root / ".git" / "info" / "exclude"
+        if exclude.parent.is_dir():
+            lines = exclude.read_text().splitlines() if exclude.exists() else []
+            if ".claude/settings.local.json" not in lines:
+                exclude.write_text("\n".join(lines + [".claude/settings.local.json"]) + "\n")
     print(f"installed holdfast hooks into {target}")
     return 0
 

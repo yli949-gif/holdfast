@@ -671,3 +671,42 @@ class TestRound4:
         assert d.tool("Edit", {"file_path": str(repo / "requirements.txt"), "old_string": "PyYAML==6.0.1\n", "new_string": ""}) == "allow"
         assert d.tool("Edit", {"file_path": str(repo / "pyproject.toml"), "old_string": "    \"PyYAML\",\n]",
                                "new_string": "    \"PyYAML\",\n    \"tenacity>=8.2\",\n]"}) == "ask"
+
+
+# ------------------------------------------------------------------ round 5: hook configuration vs git stash -u / clean
+
+class TestHookConfigSurvivesGit:
+    def _install(self, repo, local):
+        (repo / ".claude").mkdir(exist_ok=True)
+        (repo / ".claude" / ("settings.local.json" if local else "settings.json")).write_text('{"hooks": {}}')
+
+    @pytest.mark.parametrize("cmd", ["git stash -u", "git stash push --include-untracked", "git clean -fd", "git clean -fdx",
+                                     "git stash --all"])
+    def test_untracked_hook_config_cannot_be_stashed_or_cleaned(self, repo, cmd):
+        self._install(repo, local=False)
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        assert d.bash(cmd) == "deny"
+        assert (repo / ".claude" / "settings.json").exists()
+
+    def test_ignored_local_config_survives_stash_u(self, repo):
+        self._install(repo, local=True)
+        (repo / ".git" / "info" / "exclude").write_text(".claude/settings.local.json\n")
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        assert d.bash("git stash -u") == "allow"          # ignored files are not stashed by -u
+        assert (repo / ".claude" / "settings.local.json").exists()
+        assert d.bash("git clean -fdx", execute=False) == "deny"
+
+    def test_committed_hook_config_is_not_affected(self, repo):
+        self._install(repo, local=False)
+        sh("git add .claude && git commit -qm hooks", repo)
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        assert d.bash("git stash -u") == "allow"
+        assert (repo / ".claude" / "settings.json").exists()
+
+    def test_production_config_phrase_extracts_prod_rules(self, repo):
+        d = Driver(repo)
+        d.say("Never touch the production config.")
+        assert d.tool("Write", {"file_path": str(repo / "config/production.yaml"), "content": "x: 1\n"}) == "deny"

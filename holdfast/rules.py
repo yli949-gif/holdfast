@@ -372,7 +372,8 @@ def _resolve(phrase: str, last_path: Optional[list] = None, module_ok: bool = Tr
         a = alias[4:] if alias.startswith("the ") else alias
         if re.fullmatch(rf"{re.escape(a)}(?:\s+(?:directory|folder|dir|files?|suite))?", core):
             return _Res("scope", Scope(paths=list(globs)))
-    if _PROD.search(low) and re.fullmatch(r"(?:anything\s+|any\s+|the\s+|our\s+|everything\s+)*(?:in\s+|on\s+|to\s+|against\s+)?(?:the\s+)?(?:prod|production)(?:\s+(?:environment|env|cluster|servers?|database|db|systems?|stuff|deploy(?:ment)?s?|infra(?:structure)?))?", low):
+    if _PROD.search(low) and re.fullmatch(r"(?:anything\s+|any\s+|the\s+|our\s+|everything\s+)*(?:in\s+|on\s+|to\s+|against\s+)?(?:the\s+)?(?:prod|production)(?:\s+(?:environment|env|cluster|servers?|database|db|systems?|stuff|deploy(?:ment)?s?|infra(?:structure)?|"
+                                 r"config(?:uration)?s?|settings|secrets|credentials|data|files?|branch))?", low):
         return _Res("prod")
     if low == "" or _UNIVERSAL.fullmatch(low):
         return _Res("universal")

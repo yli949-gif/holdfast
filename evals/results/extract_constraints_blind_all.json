@@ -5,13 +5,13 @@
    "pos": 28,
    "exact": 42,
    "exact_pos": 27,
-   "tp": 29,
-   "pred": 29,
-   "gold": 30,
+   "tp": 30,
+   "pred": 30,
+   "gold": 31,
    "neg": 15,
    "exact_neg": 15,
    "precision": 1.0,
-   "recall": 0.967
+   "recall": 0.968
   },
   "misses": [
    [
@@ -30,114 +30,5 @@
     ]
    ]
   ]
- },
- "pattern_sub": {
-  "stats": {
-   "n": 15,
-   "pos": 8,
-   "exact": 14,
-   "exact_pos": 7,
-   "tp": 9,
-   "pred": 9,
-   "gold": 10,
-   "neg": 7,
-   "exact_neg": 7,
-   "precision": 1.0,
-   "recall": 0.9
-  },
-  "misses": [
-   [
-    "b-026",
-    "paraphrase",
-    "Stay off the main branch: no direct pushes to it.",
-    [],
-    [
-     {
-      "kind": "forbid",
-      "action": "push",
-      "branches": [
-       "main"
-      ]
-     }
-    ]
-   ]
-  ]
- },
- "llm": {
-  "stats": {
-   "n": 15,
-   "pos": 8,
-   "exact": 13,
-   "exact_pos": 6,
-   "tp": 6,
-   "pred": 8,
-   "gold": 10,
-   "partial": 2,
-   "neg": 7,
-   "exact_neg": 7,
-   "precision": 0.75,
-   "recall": 0.6
-  },
-  "misses": [
-   [
-    "b-003",
-    "paraphrase",
-    "Under no circumstances push to production.",
-    [
-     "never push on matching /prod/"
-    ],
-    [
-     {
-      "kind": "forbid",
-      "action": "modify",
-      "pattern": "production"
-     },
-     {
-      "kind": "forbid",
-      "action": "deploy",
-      "pattern": "production"
-     },
-     {
-      "kind": "forbid",
-      "action": "run",
-      "command": "kubectl apply -n production"
-     }
-    ]
-   ],
-   [
-    "b-024",
-    "paraphrase",
-    "Please keep your changes within the cli module.",
-    [
-     "never modify outside cli/**"
-    ],
-    [
-     {
-      "kind": "forbid",
-      "action": "modify",
-      "exclude_paths": [
-       "**/cli/**",
-       "**/cli.py"
-      ]
-     }
-    ]
-   ]
-  ]
- },
- "hybrid": {
-  "stats": {
-   "n": 15,
-   "pos": 8,
-   "exact": 15,
-   "exact_pos": 8,
-   "tp": 10,
-   "pred": 10,
-   "gold": 10,
-   "neg": 7,
-   "exact_neg": 7,
-   "precision": 1.0,
-   "recall": 1.0
-  },
-  "misses": []
  }
 }

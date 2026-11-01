@@ -2034,12 +2034,33 @@ def _git_restore(sub, rest, ctx, detail):
     return [Effect("discard", p, detail=detail) for p in _pathify(paths, ctx)]
 
 
+_GUARD_UNTRACKED = (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks", ".holdfast")
+
+
+def _untracked_guard_files(ctx: Ctx, ignored: bool) -> list[str]:
+    """Hook configuration / guard files that are untracked here (with ignored=True: untracked *or* ignored).
+    `git stash -u|-a` and `git clean -f[x]` remove them from the working tree, which uninstalls the guard."""
+    top = _git_out(ctx, "rev-parse", "--show-toplevel")
+    if top is None:
+        return []
+    args = ["ls-files", "--others", "--directory"] + ([] if ignored else ["--exclude-standard"])
+    out = _git_out(ctx, *args, "--", *_GUARD_UNTRACKED)
+    if out is None:
+        return []
+    return [ctx.N(posixpath.join(top.strip(), l.strip().rstrip("/"))) for l in out.splitlines() if l.strip()]
+
+
 def _git_clean(sub, rest, ctx, detail):
     if any("n" in a for a in rest if a.startswith("-") and not a.startswith("--")) or "--dry-run" in rest:
         return [Effect("read", ".", detail=detail)]
     if any("f" in a for a in rest if a.startswith("-") and not a.startswith("--")) or "--force" in rest:
         paths = _everything_or(_positionals(rest, {"-e", "--exclude"}), ctx) or ["."]
-        return [Effect("delete", p, detail=detail) for p in _pathify(paths, ctx)]
+        effs = [Effect("delete", p, detail=detail) for p in _pathify(paths, ctx)]
+        ignored = any(("x" in a or "X" in a) for a in rest if a.startswith("-") and not a.startswith("--"))
+        effs += [Effect("delete", g, detail=detail + " (removes the untracked hook configuration)")
+                 for g in _untracked_guard_files(ctx, ignored) if any(p in (".", EVERYTHING) or g.startswith(p.rstrip("/") + "/") or g == p
+                                                                       for p in _pathify(paths, ctx))]
+        return effs
     return [Effect("read", ".", detail=detail)]
 
 
@@ -2057,6 +2078,13 @@ def _git_stash(sub, rest, ctx, detail):
     if rpos[:1] in (["pop"], ["apply"]):
         ref = rpos[1] if len(rpos) > 1 else "stash@{0}"
         return _tree_change(ctx, detail, [["stash", "show", "--name-status", "--include-untracked", ref]])
+    if rpos[:1] in ([], ["push"], ["save"]) and any(a in ("-u", "--include-untracked", "-a", "--all") or
+                                                      (a.startswith("-") and not a.startswith("--") and ("u" in a or "a" in a)) for a in rest):
+        allf = any(a in ("-a", "--all") or (a.startswith("-") and not a.startswith("--") and "a" in a) for a in rest)
+        guard = _untracked_guard_files(ctx, allf)
+        if guard:
+            return [Effect("move", g, detail=detail + " (stashes away the untracked hook configuration)") for g in guard] + \
+                   [Effect("run", detail, kind="command", detail=detail)]
     return [Effect("run", detail, kind="command", detail=detail)]
 
 
