@@ -152,7 +152,7 @@ missed = violation allowed (FN); false block = benign pair denied or asked (FP).
 
 | approach | missed (plain) | missed (adversarial) | missed (benign) | missed (all) | false block (plain) | false block (adversarial) | false block (benign) | false block (all) | of which ask |
 |---|---|---|---|---|---|---|---|---|---|
-| Holdfast | 1/142 (1%) | 5/161 (3%) | 0/1 (0%) | **6/304 (2%)** | 14/635 (2%) | 49/640 (8%) | 0/423 (0%) | **63/1698 (4%)** | 60 |
+| Holdfast | 1/142 (1%) | 5/161 (3%) | 0/1 (0%) | **6/304 (2%)** | 14/635 (2%) | 50/640 (8%) | 0/423 (0%) | **64/1698 (4%)** | 60 |
 | Regex hook (strict) | 19/142 (13%) | 17/161 (11%) | 1/1 (100%) | **37/304 (12%)** | 1/635 (0%) | 2/640 (0%) | 24/423 (6%) | **27/1698 (2%)** | 0 |
 | Regex hook (lenient) | 19/142 (13%) | 17/161 (11%) | 1/1 (100%) | **37/304 (12%)** | 1/635 (0%) | 2/640 (0%) | 24/423 (6%) | **27/1698 (2%)** | 0 |
 | CC native permissions | 38/142 (27%) | 63/161 (39%) | 1/1 (100%) | **102/304 (34%)** | 1/635 (0%) | 0/640 (0%) | 8/423 (2%) | **9/1698 (1%)** | 0 |
@@ -161,7 +161,7 @@ By policy (missed / false block):
 
 | policy | violations | benign | Holdfast | Regex hook (strict) | Regex hook (lenient) | CC native permissions |
 |---|---|---|---|---|---|---|
-| commit | 5 | 257 | 0 / 7 | 0 / 0 | 0 / 0 | 1 / 0 |
+| commit | 5 | 257 | 0 / 8 | 0 / 0 | 0 / 0 | 1 / 0 |
 | delete | 73 | 170 | 4 / 8 | 9 / 12 | 9 / 12 | 27 / 2 |
 | force_push | 6 | 255 | 0 / 9 | 0 / 1 | 0 / 1 | 1 / 0 |
 | install | 24 | 235 | 0 / 5 | 2 / 1 | 2 / 1 | 2 / 0 |
@@ -226,9 +226,9 @@ Per scenario (each cell = one symbol per step: `.` correct, `M` missed violation
 
 | approach | in-process decision | as deployed |
 |---|---|---|
-| Holdfast | 0.157 ms (`monitor.evaluate`) | 85 ms (hook subprocess: python start + import + state load/lock/save + audit) |
-| Regex hook (strict / lenient) | 0.004 / 0.001 ms | >= 29 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
-| CC native permissions (our model) | 0.156 ms | in Claude Code's own process, no subprocess |
+| Holdfast | 0.175 ms (`monitor.evaluate`) | 92 ms (hook subprocess: python start + import + state load/lock/save + audit) |
+| Regex hook (strict / lenient) | 0.004 / 0.001 ms | >= 28 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
+| CC native permissions (our model) | 0.169 ms | in Claude Code's own process, no subprocess |
 <!-- TABLES:END -->
 
 ## Commentary by category

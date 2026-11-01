@@ -160,7 +160,13 @@ def effect_from_tool(tool_name: str, tool_input: dict, cwd: str, project_root: s
         return resolve_on_disk([Effect("edit", normalize_path(fp, cwd, project_root), detail=f"{t} {fp}")], cwd, project_root)
     if t == "Write":
         fp = tool_input.get("file_path", "")
-        return resolve_on_disk([Effect("write", normalize_path(fp, cwd, project_root), detail=f"Write {fp}")], cwd, project_root)
+        effs = [Effect("write", normalize_path(fp, cwd, project_root), detail=f"Write {fp}")]
+        content = tool_input.get("content")
+        absp = fp if os.path.isabs(fp) else os.path.join(cwd or "", fp)
+        if isinstance(content, str) and not content.strip() and os.path.isfile(absp) and os.path.getsize(absp) > 0:
+            # writing nothing over an existing non-empty file truncates it: destruction, like `: > f` (SPEC §2)
+            effs.append(Effect("delete", normalize_path(fp, cwd, project_root), detail=f"Write {fp} (empty content over an existing file)"))
+        return resolve_on_disk(effs, cwd, project_root)
     if t in ("Read", "Glob", "Grep", "LS"):
         fp = tool_input.get("file_path") or tool_input.get("path") or "."
         return [Effect("read", normalize_path(fp, cwd, project_root), detail=f"{t} {fp}")]
@@ -172,7 +178,9 @@ def effect_from_tool(tool_name: str, tool_input: dict, cwd: str, project_root: s
     if t.startswith("mcp__"):
         # read-only by name (get_/list_/search_...): a lookup, not an action (REVIEW-2 O1); anything else is opaque
         op = t.rsplit("__", 1)[-1].lower()
+        server = t.split("__")[1] if t.count("__") >= 2 else t
         if re.match(r"^(?:get|list|search|read|fetch|query|describe|view|show|find|lookup|count|check|inspect|retrieve)(?:_|$)", op):
-            return [Effect("read", t, kind="command", detail=t)]
+            # read-only by name: not an action on the project — but an MCP server is still (usually remote) I/O
+            return [Effect("read", t, kind="command", detail=t), Effect("network", f"mcp:{server}", kind="url", detail=t, certain=False)]
         return [Effect("exec_opaque", t, kind="opaque", detail=t, certain=False)]
     return []

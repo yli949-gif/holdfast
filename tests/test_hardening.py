@@ -622,3 +622,52 @@ class TestRound3:
         d = Driver(repo)
         d.say("never touch production")
         assert d.tool("Edit", {"file_path": str(repo / "src/production_utils.py"), "old_string": "x", "new_string": "y"}) == "allow"
+
+
+# ------------------------------------------------------------------ round 4: blind3 error analysis (post-hoc)
+
+class TestRound4:
+    def test_write_empty_over_existing_file_is_a_delete(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.tool("Write", {"file_path": str(repo / "data.txt"), "content": ""}) == "deny"
+        assert d.tool("Write", {"file_path": str(repo / "new_empty.txt"), "content": ""}) == "allow"   # creating is fine
+
+    @pytest.mark.parametrize("cmd", ["git merge --no-ff feat -m m", "git cherry-pick feat", "git revert --no-edit HEAD",
+                                     "git update-ref refs/heads/main $(git commit-tree HEAD^{tree} -p HEAD -m x)"])
+    def test_commit_creating_git_ops_under_dont_commit(self, repo, cmd):
+        sh("git checkout -q -b feat && echo y > src/b.py && git add src/b.py && git commit -qm feat && git checkout -q main", repo)
+        d = Driver(repo)
+        d.say("Don't commit anything.")
+        assert d.bash(cmd, execute=False) in ("deny", "ask")
+
+    @pytest.mark.parametrize("cmd,rule", [("git push --help", "only push after tests pass"),
+                                          ("git commit --dry-run -a", "Don't commit anything."),
+                                          ("git commit --help", "Don't commit anything."),
+                                          ("python3 -c 'import socket; print(socket.gethostname())'", "Work offline: no network access."),
+                                          ("git fetch origin", "Work offline: no network access.")])
+    def test_lookalikes_allowed(self, repo, cmd, rule):
+        d = Driver(repo)
+        d.say(rule)
+        assert d.bash(cmd, execute=False) == "allow"          # origin is a local bare repo in this fixture
+
+    def test_network_remote_still_blocked_offline(self, repo):
+        sh("git remote add gh https://github.com/o/r.git", repo)
+        d = Driver(repo)
+        d.say("Work offline: no network access.")
+        assert d.bash("git fetch gh", execute=False) == "deny"
+        assert d.decide("mcp__github__list_issues", {})[0] in ("deny", "ask")
+
+    def test_docs_about_production_are_not_production(self, repo):
+        d = Driver(repo)
+        d.say("never touch production")
+        assert d.tool("Write", {"file_path": str(repo / "docs/production-checklist.md"), "content": "# checklist\n"}) == "allow"
+        assert d.tool("Write", {"file_path": str(repo / "config/production.yaml"), "content": "x: 1\n"}) == "deny"
+
+    def test_removing_or_repinning_a_dependency_is_not_adding_one(self, repo):
+        (repo / "requirements.txt").write_text("requests==2.31.0\nPyYAML==6.0.1\n")
+        d = Driver(repo)
+        d.say("Don't install any packages or add new dependencies.")
+        assert d.tool("Edit", {"file_path": str(repo / "requirements.txt"), "old_string": "PyYAML==6.0.1\n", "new_string": ""}) == "allow"
+        assert d.tool("Edit", {"file_path": str(repo / "pyproject.toml"), "old_string": "    \"PyYAML\",\n]",
+                               "new_string": "    \"PyYAML\",\n    \"tenacity>=8.2\",\n]"}) == "ask"

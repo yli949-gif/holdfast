@@ -68,6 +68,12 @@ _FIND_FILTER = re.compile(r"\bfind\b.*\s-(?:i?name|i?path|i?regex|type|newer|mti
 
 _MANIFEST = re.compile(r"(?:^|/)(?:requirements[\w.-]*\.(?:txt|in)|constraints[\w.-]*\.txt|pyproject\.toml|setup\.(?:py|cfg)|Pipfile|"
                        r"package\.json|Gemfile|go\.mod|Cargo\.toml|composer\.json|environment\.ya?ml|pom\.xml|build\.gradle(?:\.kts)?)$")
+# a requirement-spec line: requests>=2 / "tenacity>=8.2", / "lodash": "^4.17" / tenacity = "^8" / gem 'x'
+_REQ_LINE = re.compile(r"""^\s*(?:-\s*)?["']?[A-Za-z0-9@][\w.\-/\[\],]*["']?\s*(?:===?|>=|<=|~=|!=|>|<|@\s)\s*[\w.*]"""
+                       r"""|^\s*(?!["']?(?:version|requires-python|python_requires|python|node|npm|engines|target-version)["']?\s*[:=])["']?[@\w.\-/]+["']?\s*[:=]\s*["'\{]\s*(?:version\s*=\s*["'])?[\^~<>=*\d]"""
+                       r"""|^\s*gem\s+['"]|^\s*<artifactId>|^\s*(?:implementation|api|compile)\s*[('"]|^\s*require\s+[\w.\-/]+\s+v\d""")
+_QUOTED_NAME = re.compile(r"""^\s*["'][A-Za-z0-9@][\w.\-/\[\]]*["']\s*,?\s*$""")
+_BARE_REQ = re.compile(r"^\s*[A-Za-z][\w.\-\[\],]*\s*(?:;.*)?$")
 _DEP_MARKER = re.compile(r"dependencies|requires|install_requires|devDependencies|peerDependencies|optionalDependencies|"
                          r"\[tool\.poetry\.(?:dev-)?dependencies\]|\brequire\b|<dependency>|\bgem\s+['\"]|^\s*require\s", re.I | re.M)
 
@@ -85,11 +91,31 @@ def _manifest_effects(tool_name: str, tool_input: dict, effects: list[Effect]) -
         if tool_name in ("Edit", "Write", "MultiEdit"):
             new_text = (tool_input.get("new_string") or tool_input.get("content") or "") + "".join(
                 (x.get("new_string") or "") for x in tool_input.get("edits", []) if isinstance(x, dict))
-        if tool_name in ("Edit", "Write", "MultiEdit") and not name.startswith(("requirements", "constraints")) \
-                and not _DEP_MARKER.search(new_text) and not re.search(r'^\s*"?[A-Za-z0-9_.\-\[\]]+"?\s*[:=]\s*"[\^~<>=]?\d', new_text, re.M):
-            continue
+        if tool_name in ("Edit", "Write", "MultiEdit"):
+            old_text = (tool_input.get("old_string") or "") + "".join(
+                (x.get("old_string") or "") for x in tool_input.get("edits", []) if isinstance(x, dict))
+            if tool_name == "Write":
+                try:
+                    old_text = open(tool_input.get("file_path", "")).read()
+                except OSError:
+                    old_text = ""
+            added = [l for l in new_text.splitlines() if l.strip() and l.strip() not in {x.strip() for x in old_text.splitlines()}]
+            is_req = name.startswith(("requirements", "constraints"))
+            in_dep_section = bool(_DEP_MARKER.search(old_text + "\n" + new_text))
+            if not any(_REQ_LINE.match(l) or (is_req and _BARE_REQ.match(l) and not l.lstrip().startswith("#"))
+                       or (in_dep_section and _QUOTED_NAME.match(l)) for l in added) \
+                    and not _DEP_MARKER.search("\n".join(added)):
+                continue   # removing / re-pinning nothing new, or editing tool config: not adding a dependency
         out.append(Effect("install", e.target, kind="manifest", detail=f"{e.detail} (edits dependency manifest {name})", certain=False))
     return out
+
+
+_DOC = re.compile(r"(?:^|/)docs?/|\.(?:md|markdown|rst|adoc|txt)$", re.I)
+
+
+def _is_doc(e: Effect) -> bool:
+    return e.kind == "path" and e.target not in (UNKNOWN, EVERYTHING) and bool(_DOC.search(e.target)) \
+        and not re.search(r"(?:^|/)requirements[\w.-]*\.txt$", e.target)
 
 
 def _is_guard_file(target: str) -> bool:
@@ -182,6 +208,11 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
                 continue   # the agent created this file in this session: removing it loses nothing of the user's
             if e.action in ("delete", "move", "edit", "write") and cfg.exempt_artifacts and _is_artifact(e.target) and rule.action != "*":
                 continue   # regenerable caches (__pycache__, .pytest_cache, *.pyc) are not what "never delete" protects
+            if rule.action == "network" and e.action in ("push", "force_push") and "(local remote)" in (e.detail or "") \
+                    and not (rule.scope.pattern or rule.scope.paths or rule.scope.branches):
+                continue   # pushing to a remote that is a local path is not network access
+            if _is_doc(e) and rule.scope.pattern and re.search(r"prod", rule.scope.pattern) and e.action in ("edit", "write"):
+                continue   # docs/production-checklist.md is documentation about production, not production
             m = rule.matches(e)
             if m is False and e.action == "exec_opaque" and not e.certain:
                 # an opaque execution (script file, unreadable make/npm target, decoded blob, eval of a variable)

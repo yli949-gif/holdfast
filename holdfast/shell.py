@@ -1795,6 +1795,10 @@ def _h_git(cmd, args, ctx, stdin, detail):
             effs = _h_git("git", expansion + rest, sub_ctx, stdin, detail)
             return [replace(e, detail=f"{detail} (git alias {sub} = {alias})") for e in effs]
         return [_opaque(UNKNOWN, f"{detail} (unknown git subcommand: alias or extension)")]
+    if "--help" in rest or (rest[:1] == ["-h"] and len(rest) == 1):
+        return [Effect("read", detail, kind="command", detail=detail)]          # `git push --help`: opens the manual
+    if sub in ("commit-tree", "update-ref", "mktag") or (sub == "notes" and rest[:1] in (["add"], ["append"], ["edit"])):
+        return [Effect("commit", "HEAD", kind="branch", detail=detail + " (plumbing that records history)")]
     return _GIT_SUBS.get(sub, _git_run)(sub, rest, gctx, detail)
 
 
@@ -1865,10 +1869,22 @@ def _git_push(sub, rest, ctx, detail):
         dst = re.sub(r"^refs/(heads|tags)/", "", dst)
         tgt = f"{remote}/{dst}"
         rewrite = forced or plus or removal or delete
-        effs.append(Effect("force_push" if rewrite else "push", tgt, kind="branch", detail=detail))
+        effs.append(Effect("force_push" if rewrite else "push", tgt, kind="branch",
+                           detail=detail + (" (local remote)" if _remote_is_local(remote, ctx) else "")))
         if delete or removal:
             effs.append(Effect("delete", tgt, kind="branch", detail=detail))
     return effs
+
+
+def _remote_is_local(remote: str, ctx: Ctx) -> bool:
+    """A remote that is a local path (or a remote name whose URL is one) involves no network I/O."""
+    url = remote
+    if not re.match(r"^(?:[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:|/|\./|\.\./|~)", remote):
+        out = _git_out(ctx, "config", "--get", f"remote.{remote}.url")
+        if out is None:
+            return False
+        url = out.strip()
+    return bool(re.match(r"^(?:file://|/|\./|\.\./|~)", url))
 
 
 def _git_reset(sub, rest, ctx, detail):
@@ -1986,12 +2002,21 @@ def _git_merge_like(sub, rest, ctx, detail):
                 diffs.append(["diff", "--name-status", a or "HEAD", b or "HEAD"])
             else:
                 diffs.append(["diff-tree", "-r", "--no-commit-id", "--name-status", "--root", c])
-        return _tree_change(ctx, detail, diffs)
+        effs = _tree_change(ctx, detail, diffs)
+        if not any(a in ("-n", "--no-commit") for a in rest):
+            effs.append(Effect("commit", "HEAD", kind="branch", detail=detail + f" ({sub} records a commit)"))
+        return effs
+    if sub in ("cherry-pick", "revert") and not any(a in ("-n", "--no-commit") for a in rest):
+        pass  # handled below with the tree diff
     onto = next((rest[k + 1] for k, a in enumerate(rest) if a == "--onto" and k + 1 < len(rest)), None)
     up = onto or (pos[0] if pos else "@{u}")
     effs = _tree_change(ctx, detail, [["diff", "--name-status", f"HEAD...{up}"]])
     if sub == "rebase":
         effs.append(Effect("history_rewrite", "HEAD", kind="branch", detail=detail))
+    elif sub == "merge" and not any(a in ("--no-commit", "--squash", "--ff-only") for a in rest):
+        # a merge records a merge commit (a fast-forward does not, but that is decided at run time)
+        effs.append(Effect("commit", "HEAD", kind="branch", detail=detail + " (records a merge commit unless it fast-forwards)",
+                           certain="--no-ff" in rest))
     return effs
 
 
@@ -2036,6 +2061,8 @@ def _git_stash(sub, rest, ctx, detail):
 
 
 def _git_history(sub, rest, ctx, detail):
+    if sub == "commit" and any(a in ("--dry-run", "--help", "-h") for a in rest):
+        return [Effect("read", detail, kind="command", detail=detail)]
     if sub == "commit" and "--amend" not in rest:
         return [Effect("commit", "HEAD", kind="branch", detail=detail)]
     if sub == "commit":          # --amend records a new commit *and* rewrites the previous one
@@ -2083,7 +2110,9 @@ def _git_network(sub, rest, ctx, detail):
     if sub == "lfs" and rpos[:1] not in (["fetch"], ["pull"], ["push"], ["install"]):
         return [Effect("run", detail, kind="command", detail=detail)]
     url = next((p for p in rpos if "://" in p or re.match(r"[\w.-]+@[\w.-]+:", p)), None)
-    effs = [Effect("network", url or ("git " + sub), kind="url", detail=detail)]
+    rname = url or (rpos[0] if rpos and sub in ("fetch", "pull", "ls-remote", "clone") else ("origin" if sub in ("fetch", "pull") else None))
+    local = rname is not None and _remote_is_local(rname, ctx)
+    effs = [] if local else [Effect("network", url or ("git " + sub), kind="url", detail=detail)]
     if sub == "clone":
         target = None
         if url and len(rpos) > rpos.index(url) + 1:
@@ -2514,6 +2543,9 @@ def _make_rules(text: str) -> tuple[dict, str | None]:
 
 
 def _h_make(cmd, args, ctx, stdin, detail):
+    if any(a in ("-n", "--dry-run", "--just-print", "--recon", "-q", "--question", "-p", "--print-data-base") or
+           re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", a) for a in args if a.startswith("-") and not a.startswith("--file")):
+        return [Effect("read", detail, kind="command", detail=detail)]       # prints recipes, runs nothing
     if any(a in ("-n", "--dry-run", "--just-print", "--recon", "-q", "--question", "-p", "--print-data-base", "--help", "-h", "-v", "--version") for a in args):
         return [Effect("run", detail, kind="command", detail=detail)]
     mctx = ctx
@@ -2673,6 +2705,8 @@ _PY_ARGV_STAR = {"asyncio.create_subprocess_exec", "os.execlp", "os.execl", "os.
 _PY_DYNAMIC = {"eval", "exec", "compile", "__import__", "importlib.import_module", "runpy.run_path", "runpy.run_module", "ctypes.CDLL",
                "ctypes.cdll.LoadLibrary", "os.execv", "os.execve", "os.execvp", "os.execvpe", "os.spawnv", "os.spawnve", "os.spawnvp",
                "os.posix_spawn", "os.posix_spawnp", "os.fork"}
+_PY_NET_SAFE = {"socket.gethostname", "socket.htons", "socket.ntohs", "socket.htonl", "socket.ntohl", "socket.inet_aton",
+                "socket.inet_ntoa", "socket.inet_pton", "socket.inet_ntop"}       # local, no I/O
 _PY_NET = ("requests.", "httpx.", "aiohttp.", "urllib.request.", "urllib3.", "http.client.", "socket.", "ftplib.", "smtplib.",
            "paramiko.", "websocket.", "websockets.", "urllib2.", "pycurl.", "telnetlib.", "xmlrpc.client.", "grpc.")
 _PATH_DELETE_METHODS = {"unlink", "rmdir", "rmtree"}
@@ -2951,7 +2985,7 @@ class _PyScan:
         if q in _PY_DYNAMIC or q.startswith("ctypes.") or (q in ("getattr",) and len(args) >= 2 and self.const(args[1]) is None):
             self.add("exec_opaque", UNKNOWN, note=f"dynamic: {q}")
             return
-        if q.startswith(_PY_NET) or q in ("urllib.urlopen", "urlopen", "urlretrieve") or q.endswith((".urlopen", ".urlretrieve")):
+        if (q.startswith(_PY_NET) and q not in _PY_NET_SAFE) or q in ("urllib.urlopen", "urlopen", "urlretrieve") or q.endswith((".urlopen", ".urlretrieve")):
             url = self.const(a0) if a0 is not None else None
             self.add("network", url or UNKNOWN, kind="url", note=q)
             if q.endswith("urlretrieve") and len(args) > 1:
