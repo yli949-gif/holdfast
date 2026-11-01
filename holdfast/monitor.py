@@ -355,15 +355,50 @@ def is_affirmation(p: str) -> bool:
     return not _AFFIRM_VETO.search(p)
 
 
+_QUESTION = re.compile(r"\?\s*$|^\s*(?:what|why|how|where|when|who|which|whose|is|are|was|were|does|do|did|could|would|should|"
+                       r"can you (?:show|tell|explain|list|describe|remind)|tell me|show me|explain|describe|walk me through|remind me)\b",
+                       re.I)
+_PROCEED = re.compile(r"\b(?:go ahead|proceed|do it|go for it|implement (?:it|this|that|the plan)|start (?:on it|implementing|now)|"
+                      r"carry on|make the changes?|apply (?:it|the (?:plan|changes?|fix))|looks good,? (?:go|ship|do)|plan (?:is )?approved|"
+                      r"you can (?:now )?(?:start|go|proceed|edit|change|implement|make))\b", re.I)
+_WORK = re.compile(r"^\s*(?:(?:now|ok(?:ay)?|great|thanks|alright|cool|good|also|and|then|next|so)[,.!]?\s+)*(?:please\s+)?"
+                   r"(?:fix|add|implement|change|update|refactor|make|create|write|edit|remove|delete|tidy|clean|rename|move|build|"
+                   r"set up|install|bump|replace|convert|migrate|port|improve|optimi[sz]e|get rid|modify|patch|rewrite|split|merge)\b",
+                   re.I)
+_UNTIL_EXPLICIT = re.compile(r"\buntil\s+(?:i|we|you get my|after i)\b|\buntil\s+(?:approved|reviewed|confirmed|signed)|\bwait for (?:my|me)",
+                             re.I)
+_ACTION_VERB = {"push": r"push", "force_push": r"force[- ]?push", "commit": r"commit", "deploy": r"deploy|release|ship",
+                "install": r"install", "delete": r"delete|remove|rm|clean ?up|get rid"}
+
+
+def _work_request(p: str) -> bool:
+    return any(_WORK.match(seg) for seg in re.split(r"(?<=[.!;\n])\s+|\s+(?:and then|then)\s+", p) if seg.strip())
+
+
+def _releases(hold: dict, p: str) -> bool:
+    """Does user prompt `p` release temporary hold `hold`? (REVIEW-2 N7/N8)"""
+    if _QUESTION.search(p) or NEGATE.match(p):
+        return False                                  # a question about the code is not the go-ahead
+    action = hold.get("action", "modify")
+    if action in _ACTION_VERB:
+        # "don't push for now": only a go-ahead for that very action lifts it
+        verb = _ACTION_VERB[action]
+        return bool(re.search(rf"\b(?:go ahead and|now|please|you can|ok,?|yes,?|feel free to)?\s*(?:{verb})\b", p, re.I)) and \
+            not re.search(rf"\b(?:don't|do not|not|never|no)\s+(?:\w+\s+)?(?:{verb})", p, re.I)
+    if _UNTIL_EXPLICIT.search(hold.get("text", "")):
+        return bool(_PROCEED.search(p))               # "until I've reviewed the plan" needs an explicit go-ahead
+    return bool(_PROCEED.search(p)) or _work_request(p)
+
+
 def _expire_holds(state: dict, prompt: str) -> list[str]:
-    """Temporary holds ("don't change anything yet") lapse at the next user turn that asks for work."""
+    """Temporary holds ("don't change anything yet") lapse at the next user turn that asks for that work."""
     from .rules import extract_rules
-    new_hold = any(r.expires == "next_turn" for r in extract_rules(prompt))
-    if new_hold or AFFIRM.match(prompt.strip()) or NEGATE.match(prompt.strip()) or len(prompt.split()) < 3:
+    if any(r.expires == "next_turn" for r in extract_rules(prompt)):
         return []
     expired = []
     for r in state.get("rules", []):
-        if r.get("active", True) and r.get("expires") == "next_turn" and r.get("created_turn", 0) < state["turn"]:
+        if r.get("active", True) and r.get("expires") == "next_turn" and r.get("created_turn", 0) < state["turn"] \
+                and _releases(r, prompt.strip()):
             r["active"] = False
             r["expired_turn"] = state["turn"]
             expired.append(r["id"])

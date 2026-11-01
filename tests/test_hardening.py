@@ -414,3 +414,47 @@ class TestTestsPassPredicate:
         hook.run("PostToolUse", d._p("PostToolUse", tool_name="Write", tool_input={"file_path": str(repo / "scratch_a.txt")},
                                     tool_response={}, tool_use_id=ta), CFG)
         assert d.bash("rm scratch_a.txt") == "allow"
+
+
+# ------------------------------------------------------------------ N7 / N8: temporary holds
+
+class TestTemporaryHolds:
+    @pytest.mark.parametrize("hold,question", [
+        ("Don't change anything yet, just look around and tell me how it works.", "What does src/a.py actually do?"),
+        ("Don't change anything until I've reviewed the plan.", "Can you show me the plan again please"),
+        ("Don't change anything yet.", "how are the tests run"),
+    ])
+    def test_question_does_not_lift_hold(self, repo, hold, question):
+        d = Driver(repo)
+        d.say(hold)
+        d.say(question)
+        assert d.tool("Edit", {"file_path": str(repo / "src/a.py"), "old_string": "1", "new_string": "2"}) == "deny"
+
+    def test_review_hold_needs_explicit_go_ahead(self, repo):
+        d = Driver(repo)
+        d.say("Don't change anything until I've reviewed the plan.")
+        d.say("Also mention the tests in the plan")
+        assert d.tool("Edit", {"file_path": str(repo / "src/a.py")}) == "deny"
+        d.say("Looks good, go ahead and implement it.")
+        assert d.tool("Edit", {"file_path": str(repo / "src/a.py")}) == "allow"
+
+    def test_push_hold_lifts_only_on_push_go_ahead(self, repo):
+        d = Driver(repo)
+        d.say("Fix the bug in src/a.py but don't push for now.")
+        d.say("also update the docstring in a.py")
+        assert d.bash("git push -q origin main", execute=False) == "deny"
+        d.say("ok, push it now")
+        assert d.bash("git push -q origin main", execute=False) == "allow"
+
+    @pytest.mark.parametrize("release", ["ok go ahead", "yes, implement it", "Tidy up this repo and add a .gitignore."])
+    def test_go_ahead_or_work_request_lifts_hold(self, repo, release):
+        d = Driver(repo)
+        d.say("Don't change anything yet, first tell me your plan.")
+        d.say(release)
+        assert d.tool("Edit", {"file_path": str(repo / "src/a.py")}) == "allow"
+
+    def test_bare_ok_is_an_acknowledgement_not_a_release(self, repo):
+        d = Driver(repo)
+        d.say("Don't change anything yet.")
+        d.say("ok")
+        assert d.tool("Edit", {"file_path": str(repo / "src/a.py")}) == "deny"
