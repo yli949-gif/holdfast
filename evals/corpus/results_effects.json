@@ -2283,7 +2283,7 @@
    ],
    "predicted": [
     [
-     "run",
+     "read",
      "git log --oneline",
      true
     ]
@@ -2468,7 +2468,7 @@
    ],
    "predicted": [
     [
-     "run",
+     "read",
      "git diff",
      true
     ]
@@ -2497,7 +2497,7 @@
    ],
    "predicted": [
     [
-     "run",
+     "read",
      "git status",
      true
     ]

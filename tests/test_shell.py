@@ -233,9 +233,13 @@ class TestGit:
     @pytest.mark.parametrize("cmd", ["git commit --amend", "git rebase -i HEAD~3", "git rebase main", "git filter-branch"])
     def test_history_rewrite(self, cmd):
         # rebase additionally reports the paths it rewrites (unknown here: no repository on disk, REVIEW-2 B7)
-        assert "history_rewrite" in acts(cmd) and set(acts(cmd)) <= {"history_rewrite", "edit"}
+        assert "history_rewrite" in acts(cmd) and set(acts(cmd)) <= {"history_rewrite", "edit", "commit"}
 
-    @pytest.mark.parametrize("cmd", ["git add .", "git status", "git log", "git diff", "git stash", "git -C /x status"])
+    @pytest.mark.parametrize("cmd", ["git status", "git log", "git diff", "git -C /x status"])
+    def test_readonly_git_is_read(self, cmd):
+        assert acts(cmd) == ["read"]       # inspection, not execution (prod run rules must not fire on git log, O5)
+
+    @pytest.mark.parametrize("cmd", ["git add .", "git stash"])
     def test_benign_git_is_run(self, cmd):
         assert acts(cmd) == ["run"]
 
@@ -786,10 +790,16 @@ class TestTruncation:
     def test_non_zeroing_is_write_only(self, cmd):
         assert "delete" not in acts(cmd) and ("write", "sub/f") in pairs(cmd)
 
-    @pytest.mark.parametrize("cmd", ["sed -i '/x/d' f", "sed -i 'd' f"])
+    @pytest.mark.parametrize("cmd", ["sed -i '/x/d' f", "sed -i 's/a/b/' f", "sed -i -n '/x/p' f"])
     def test_sed_line_delete_is_edit(self, cmd):
-        # documented: deleting lines (even all of them) via sed is a content edit, not a file delete
+        # deleting *some* lines via sed is a content edit, not a file delete
         assert pairs(cmd) == [("edit", "sub/f")]
+
+    @pytest.mark.parametrize("cmd", ["sed -i 'd' f", "sed -i '1,$d' f", "sed -i -e '/^/d' f", "sed -i '/.*/d' f"])
+    def test_sed_deleting_every_line_empties_the_file(self, cmd):
+        # emptying a file is destruction, like `: > f` / truncate -s0 (red team del-31, REVIEW B20); this changed
+        # from the earlier documented "content edit" reading
+        assert ("delete", "sub/f") in pairs(cmd)
 
 
 class TestGitHardening:

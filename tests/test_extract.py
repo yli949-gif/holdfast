@@ -127,7 +127,7 @@ class TestForbidGitInstallNetwork:
     @pytest.mark.parametrize("text", ["Never touch production", "Don't deploy to prod", "Do not run anything against production"])
     def test_prod(self, text):
         rules = extract_rules(text)
-        assert {(r.kind, r.action) for r in rules} == {("forbid", "modify"), ("forbid", "deploy"), ("forbid", "run")}
+        assert {(r.kind, r.action) for r in rules} == {("forbid", "modify"), ("forbid", "deploy"), ("forbid", "run"), ("forbid", "network")}
         assert all(r.scope.pattern == PROD_PATTERN or r.scope.command for r in rules)
 
 
@@ -499,7 +499,7 @@ class TestMorePhrasings:
 
     @pytest.mark.parametrize("text", ["Don't touch anything production.", "Never touch prod.", "Hands off production."])
     def test_prod(self, text):
-        assert {(r.kind, r.action) for r in extract_rules(text)} == {("forbid", "modify"), ("forbid", "deploy"), ("forbid", "run")}
+        assert {(r.kind, r.action) for r in extract_rules(text)} == {("forbid", "modify"), ("forbid", "deploy"), ("forbid", "run"), ("forbid", "network")}
 
     @pytest.mark.parametrize("text,action", [
         ("Only push after the test suite passes.", "push"), ("Don't push until tests are green.", "push"),

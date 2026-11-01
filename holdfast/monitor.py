@@ -66,6 +66,32 @@ _WHOLE_TREE = re.compile(r"(?:^|\s)['\"]?(?:\.{1,2}/?|/|~/?|\$HOME/?|\$\{HOME\}/
 _FIND_FILTER = re.compile(r"\bfind\b.*\s-(?:i?name|i?path|i?regex|type|newer|mtime|mmin|size|empty|user|perm)\b")
 
 
+_MANIFEST = re.compile(r"(?:^|/)(?:requirements[\w.-]*\.(?:txt|in)|constraints[\w.-]*\.txt|pyproject\.toml|setup\.(?:py|cfg)|Pipfile|"
+                       r"package\.json|Gemfile|go\.mod|Cargo\.toml|composer\.json|environment\.ya?ml|pom\.xml|build\.gradle(?:\.kts)?)$")
+_DEP_MARKER = re.compile(r"dependencies|requires|install_requires|devDependencies|peerDependencies|optionalDependencies|"
+                         r"\[tool\.poetry\.(?:dev-)?dependencies\]|\brequire\b|<dependency>|\bgem\s+['\"]|^\s*require\s", re.I | re.M)
+
+
+def _manifest_effects(tool_name: str, tool_input: dict, effects: list[Effect]) -> list[Effect]:
+    """Adding a dependency by editing its manifest is installing it later (REVIEW B18/O4): an edit/write of a
+    dependency manifest yields an uncertain `install` effect — always for requirements files and shell writes
+    (content not visible), and for Edit/Write of other manifests only when the new text touches a dependency section."""
+    out = []
+    for e in effects:
+        if e.action not in ("edit", "write") or e.kind != "path" or e.target in (UNKNOWN, EVERYTHING) or not _MANIFEST.search(e.target):
+            continue
+        name = e.target.rsplit("/", 1)[-1]
+        new_text = ""
+        if tool_name in ("Edit", "Write", "MultiEdit"):
+            new_text = (tool_input.get("new_string") or tool_input.get("content") or "") + "".join(
+                (x.get("new_string") or "") for x in tool_input.get("edits", []) if isinstance(x, dict))
+        if tool_name in ("Edit", "Write", "MultiEdit") and not name.startswith(("requirements", "constraints")) \
+                and not _DEP_MARKER.search(new_text) and not re.search(r'^\s*"?[A-Za-z0-9_.\-\[\]]+"?\s*[:=]\s*"[\^~<>=]?\d', new_text, re.M):
+            continue
+        out.append(Effect("install", e.target, kind="manifest", detail=f"{e.detail} (edits dependency manifest {name})", certain=False))
+    return out
+
+
 def _is_guard_file(target: str) -> bool:
     return target not in (UNKNOWN, EVERYTHING) and bool(_GUARD_FILES.search(target))
 
@@ -124,6 +150,7 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
              tool_use_id: str = "") -> Decision:
     """Pure-ish decision function. Mutates `state` only to record pending confirmations / consume grants."""
     effects = effect_from_tool(tool_name, tool_input, cwd, root)
+    effects = effects + _manifest_effects(tool_name, tool_input, effects)
     rules = rules_of(state)
     best = Decision("allow", effects=effects)
     now = time.time()
@@ -164,7 +191,8 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
                 continue
             # an effect derived heuristically but with a concrete, in-scope target (os.remove('x'), heredoc writing
             # src/core/util.py) is treated as certain: the target is known, only the mechanism was indirect
-            concrete = e.target not in (UNKNOWN, EVERYTHING) and "*" not in e.target and m is True
+            # (a dependency-manifest edit is semantically uncertain even though its path is known)
+            concrete = e.target not in (UNKNOWN, EVERYTHING) and "*" not in e.target and m is True and e.kind != "manifest"
             uncertain = (m is None) or (not e.certain and not concrete)
             cand: Decision | None = None
             if uncertain:

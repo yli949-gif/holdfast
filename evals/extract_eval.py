@@ -23,8 +23,9 @@ command?, prerequisite?, expires?}. Missing fields mean empty. `paths`/`exclude_
 as sets after collapsing a known alias expansion (rules._PATH_ALIASES) to its first glob;
 `branches` after dropping the "*/x" duplicates. `pattern` / `command` in a label are EXAMPLE
 strings that the predicted regex must match (an empty label requires an empty regex).
-{"prod": true, "kind": K} is shorthand for the three-rule production bundle:
-K modify /prod/, K deploy /prod/, K run (command matches "kubectl apply -n production").
+{"prod": true, "kind": K} is shorthand for the production bundle:
+K modify /prod/, K deploy /prod/, K run (command matches "kubectl apply -n production"), and (since 2026-10-31)
+K network /prod/ (push to a production branch/remote, production hosts and endpoints).
 """
 from __future__ import annotations
 
@@ -84,7 +85,8 @@ def expand_label(rules: list[dict]) -> list[dict]:
         if r.get("prod"):
             k = r["kind"]
             out += [dict(kind=k, action="modify", pattern="production"), dict(kind=k, action="deploy", pattern="production"),
-                    dict(kind=k, action="run", command="kubectl apply -n production")]
+                    dict(kind=k, action="run", command="kubectl apply -n production"),
+                    dict(kind=k, action="network", pattern="production")]
         else:
             out.append(r)
     return out

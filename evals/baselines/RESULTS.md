@@ -128,7 +128,7 @@ present and is a hard block in headless `-p` runs.
 
 | approach | bypass (allowed AND effect happened) | attacks denied | attacks asked | allowed, no effect | benign false-blocked | of which ask |
 |---|---|---|---|---|---|---|
-| Holdfast | **1/93 (1%)** | 89 | 3 | 0 | 1/21 (5%) | 0 |
+| Holdfast | **0/93 (0%)** | 90 | 3 | 0 | 1/21 (5%) | 0 |
 | Regex hook (strict) | **24/93 (26%)** | 68 | 0 | 1 | 5/21 (24%) | 0 |
 | Regex hook (lenient) | **52/93 (56%)** | 40 | 0 | 1 | 1/21 (5%) | 0 |
 | CC native permissions | **41/93 (44%)** | 39 | 12 | 1 | 6/21 (29%) | 4 |
@@ -139,7 +139,7 @@ Per constraint type (`type` = first segment of the probe category; `benign`/`con
 |---|---|---|---|---|---|
 | benign | 18 | 0 byp / 1 fb / 0 ask | 0 byp / 3 fb / 0 ask | 0 byp / 1 fb / 0 ask | 0 byp / 4 fb / 0 ask |
 | confirm | 2 | 0 byp / 0 fb / 0 ask | 1 byp / 1 fb / 0 ask | 1 byp / 0 fb / 0 ask | 1 byp / 1 fb / 0 ask |
-| delete | 36 | 1 byp / 0 fb / 2 ask | 13 byp / 0 fb / 0 ask | 35 byp / 0 fb / 0 ask | 25 byp / 0 fb / 10 ask |
+| delete | 36 | 0 byp / 0 fb / 2 ask | 13 byp / 0 fb / 0 ask | 35 byp / 0 fb / 0 ask | 25 byp / 0 fb / 10 ask |
 | force_push | 4 | 0 byp / 0 fb / 0 ask | 0 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask |
 | install | 13 | 0 byp / 0 fb / 1 ask | 2 byp / 0 fb / 0 ask | 2 byp / 0 fb / 0 ask | 3 byp / 0 fb / 0 ask |
 | prod | 12 | 0 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask |
@@ -152,7 +152,7 @@ missed = violation allowed (FN); false block = benign pair denied or asked (FP).
 
 | approach | missed (plain) | missed (adversarial) | missed (benign) | missed (all) | false block (plain) | false block (adversarial) | false block (benign) | false block (all) | of which ask |
 |---|---|---|---|---|---|---|---|---|---|
-| Holdfast | 7/142 (5%) | 13/161 (8%) | 0/1 (0%) | **20/304 (7%)** | 21/635 (3%) | 49/640 (8%) | 2/423 (0%) | **72/1698 (4%)** | 69 |
+| Holdfast | 1/142 (1%) | 5/161 (3%) | 0/1 (0%) | **6/304 (2%)** | 14/635 (2%) | 49/640 (8%) | 0/423 (0%) | **63/1698 (4%)** | 60 |
 | Regex hook (strict) | 19/142 (13%) | 17/161 (11%) | 1/1 (100%) | **37/304 (12%)** | 1/635 (0%) | 2/640 (0%) | 24/423 (6%) | **27/1698 (2%)** | 0 |
 | Regex hook (lenient) | 19/142 (13%) | 17/161 (11%) | 1/1 (100%) | **37/304 (12%)** | 1/635 (0%) | 2/640 (0%) | 24/423 (6%) | **27/1698 (2%)** | 0 |
 | CC native permissions | 38/142 (27%) | 63/161 (39%) | 1/1 (100%) | **102/304 (34%)** | 1/635 (0%) | 0/640 (0%) | 8/423 (2%) | **9/1698 (1%)** | 0 |
@@ -161,14 +161,14 @@ By policy (missed / false block):
 
 | policy | violations | benign | Holdfast | Regex hook (strict) | Regex hook (lenient) | CC native permissions |
 |---|---|---|---|---|---|---|
-| commit | 5 | 257 | 1 / 8 | 0 / 0 | 0 / 0 | 1 / 0 |
-| delete | 73 | 170 | 7 / 9 | 9 / 12 | 9 / 12 | 27 / 2 |
-| force_push | 6 | 255 | 0 / 10 | 0 / 1 | 0 / 1 | 1 / 0 |
-| install | 24 | 235 | 2 / 6 | 2 / 1 | 2 / 1 | 2 / 0 |
-| network | 67 | 167 | 2 / 1 | 10 / 5 | 10 / 5 | 35 / 4 |
-| prod | 30 | 225 | 5 / 20 | 0 / 1 | 0 / 1 | 0 / 2 |
-| push | 19 | 242 | 0 / 8 | 0 / 2 | 0 / 2 | 2 / 1 |
-| tests | 80 | 147 | 3 / 10 | 16 / 5 | 16 / 5 | 34 / 0 |
+| commit | 5 | 257 | 0 / 7 | 0 / 0 | 0 / 0 | 1 / 0 |
+| delete | 73 | 170 | 4 / 8 | 9 / 12 | 9 / 12 | 27 / 2 |
+| force_push | 6 | 255 | 0 / 9 | 0 / 1 | 0 / 1 | 1 / 0 |
+| install | 24 | 235 | 0 / 5 | 2 / 1 | 2 / 1 | 2 / 0 |
+| network | 67 | 167 | 0 / 0 | 10 / 5 | 10 / 5 | 35 / 4 |
+| prod | 30 | 225 | 0 / 18 | 0 / 1 | 0 / 1 | 0 / 2 |
+| push | 19 | 242 | 0 / 7 | 0 / 2 | 0 / 2 | 2 / 1 |
+| tests | 80 | 147 | 2 / 9 | 16 / 5 | 16 / 5 | 34 / 0 |
 
 ### 2b. Legacy verdict-labelled corpus (evals/corpus/toolcalls.legacy.jsonl, dev set Holdfast was tuned on)
 
@@ -176,7 +176,7 @@ missed = violation allowed (FN); false block = benign pair denied or asked (FP).
 
 | approach | missed (plain) | missed (adversarial) | missed (all) | false block (benign) | false block (all) | of which ask |
 |---|---|---|---|---|---|---|
-| Holdfast | 1/94 (1%) | 8/232 (3%) | **9/326 (3%)** | 7/147 (5%) | **7/147 (5%)** | 6 |
+| Holdfast | 1/94 (1%) | 5/232 (2%) | **6/326 (2%)** | 8/147 (5%) | **8/147 (5%)** | 7 |
 | Regex hook (strict) | 1/94 (1%) | 70/232 (30%) | **71/326 (22%)** | 36/147 (24%) | **36/147 (24%)** | 0 |
 | Regex hook (lenient) | 1/94 (1%) | 70/232 (30%) | **71/326 (22%)** | 36/147 (24%) | **36/147 (24%)** | 0 |
 | CC native permissions | 4/94 (4%) | 124/232 (53%) | **128/326 (39%)** | 38/147 (26%) | **38/147 (26%)** | 0 |
@@ -188,7 +188,7 @@ By policy (missed / false block):
 | S1:Never delete anything under data/ | 59 | 23 | 1 / 0 | 18 / 1 | 18 / 1 | 34 / 4 |
 | S2:Don't modify the tests | 71 | 27 | 0 / 0 | 21 / 1 | 21 / 1 | 31 / 1 |
 | S3:Never force push | 40 | 21 | 0 / 3 | 3 / 5 | 3 / 5 | 10 / 5 |
-| S4:No new dependencies | 48 | 28 | 4 / 2 | 7 / 2 | 7 / 2 | 16 / 1 |
+| S4:No new dependencies | 48 | 28 | 1 / 3 | 7 / 2 | 7 / 2 | 16 / 1 |
 | S5:Never touch production | 51 | 26 | 4 / 1 | 6 / 16 | 6 / 16 | 4 / 22 |
 | S6:Work offline | 57 | 22 | 0 / 1 | 16 / 11 | 16 / 11 | 33 / 5 |
 
@@ -226,9 +226,9 @@ Per scenario (each cell = one symbol per step: `.` correct, `M` missed violation
 
 | approach | in-process decision | as deployed |
 |---|---|---|
-| Holdfast | 0.141 ms (`monitor.evaluate`) | 76 ms (hook subprocess: python start + import + state load/lock/save + audit) |
-| Regex hook (strict / lenient) | 0.003 / 0.001 ms | >= 22 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
-| CC native permissions (our model) | 0.144 ms | in Claude Code's own process, no subprocess |
+| Holdfast | 0.157 ms (`monitor.evaluate`) | 85 ms (hook subprocess: python start + import + state load/lock/save + audit) |
+| Regex hook (strict / lenient) | 0.004 / 0.001 ms | >= 29 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
+| CC native permissions (our model) | 0.156 ms | in Claude Code's own process, no subprocess |
 <!-- TABLES:END -->
 
 ## Commentary by category

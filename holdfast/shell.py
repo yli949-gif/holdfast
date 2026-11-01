@@ -1006,6 +1006,18 @@ def _classify_argv(argv: list[str], ctx: Ctx, stdin: Stdin, assigns0: list[str] 
         sub.env["#"] = [str(len(args))]
         del sub.funcs[cmd]                      # no recursion
         return _run_tokens(lexed, body, sub, stdin), Stdin("unknown")
+    if cmd == "coreutils" and args:
+        # multicall binary: `coreutils --coreutils-prog=rm …` / `coreutils rm …`
+        if args[0].startswith("--coreutils-prog="):
+            return _classify_argv([args[0].split("=", 1)[1]] + args[1:], ctx, stdin, assigns)
+        if not args[0].startswith("-"):
+            return _classify_argv(args, ctx, stdin, assigns)
+    if re.fullmatch(r"pip\d(?:\.\d+)?", cmd):
+        cmd = "pip"
+    if args and all(a in ("--help", "--version") or a.startswith("-") for a in args) and any(a in ("--help", "--version") for a in args) \
+            and cmd not in INTERPRETERS and cmd not in SHELLS and not re.fullmatch(r"python\d(\.\d+)?|pypy\d?", cmd) \
+            and not head.startswith(("./", "/")) and "/" not in head:
+        return [Effect("run", detail, kind="command", detail=detail)], Stdin("unknown")     # help / version probe
     handler = _HANDLERS.get(cmd)
     if handler is None:
         if cmd in INTERPRETERS or re.fullmatch(r"python\d(\.\d+)?|pypy\d?", cmd):
@@ -1238,6 +1250,9 @@ def _h_tee(cmd, args, ctx, stdin, detail):
     return [Effect("write", ctx.N(p), detail=detail) for p in _paths_after_opts(args)], stdin
 
 
+_SED_WIPE = re.compile(r"(?:(?:0|1)\s*,\s*\$|,\s*\$)?\s*d\s*;?|/(?:\^|\$|\.\*|\^\.\*|\^\.\*\$|)/\s*d\s*;?|\$!d\s*;\s*d")
+
+
 def _h_sed(cmd, args, ctx, stdin, detail):
     inplace = any(a == "-i" or (a.startswith("-i") and not a.startswith("--")) or a.startswith("--in-place") or
                   (re.fullmatch(r"-[a-zA-Z]*i[a-zA-Z]*", a) is not None and not a.startswith("--")) for a in args)
@@ -1246,8 +1261,16 @@ def _h_sed(cmd, args, ctx, stdin, detail):
     if not script_vals and pos:
         pos = pos[1:]   # first positional is the script
     if inplace:
-        # documented: `sed -i '/x/d' f` (even deleting every line) is a content *edit* of f, not a file delete
-        return [Effect("edit", ctx.N(f), detail=detail) for f in pos] or [Effect("edit", UNKNOWN, detail=detail, certain=False)]
+        # `sed -i '/x/d' f` is a content edit; a script that removes *every* line truncates the file, which is
+        # destruction exactly like `: > f` or `truncate -s0 f` (red team del-31, REVIEW B20)
+        scripts = list(script_vals) if script_vals else ([_paths_after_opts(args)[0]] if _paths_after_opts(args) else [])
+        quiet = any(a in ("-n", "--quiet", "--silent") or re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", a or "") for a in args)
+        wipes = any(_SED_WIPE.fullmatch(sc.strip()) for sc in scripts) or \
+            (quiet and not any(re.search(r"(?:^|[;}\s/])[pPw]\b|[pPw]\s*$", sc) for sc in scripts))
+        effs = [Effect("edit", ctx.N(f), detail=detail) for f in pos] or [Effect("edit", UNKNOWN, detail=detail, certain=False)]
+        if wipes:
+            effs += [Effect("delete", ctx.N(f), detail=detail + " (script deletes every line: empties the file)") for f in pos]
+        return effs
     return [Effect("read", ctx.N(p), detail=detail) for p in pos] or [Effect("read", ".", detail=detail)]
 
 
@@ -1775,7 +1798,15 @@ def _h_git(cmd, args, ctx, stdin, detail):
     return _GIT_SUBS.get(sub, _git_run)(sub, rest, gctx, detail)
 
 
+_GIT_READONLY = {"log", "show", "diff", "status", "grep", "blame", "shortlog", "describe", "rev-parse", "ls-files", "ls-tree",
+                 "cat-file", "whatchanged", "name-rev", "merge-base", "rev-list", "for-each-ref", "count-objects", "check-ignore",
+                 "show-ref", "annotate", "diff-tree", "diff-index", "diff-files", "range-diff", "var", "version", "help"}
+
+
 def _git_run(sub, rest, ctx, detail):
+    if sub in _GIT_READONLY and not any(a.startswith(("--output", "--ext-diff", "--textconv")) or a == "-o" for a in rest):
+        # read-only inspection: a "never touch prod" run rule must not fire on `git log --grep production` (O5)
+        return [Effect("read", detail, kind="command", detail=detail)]
     return [Effect("run", detail, kind="command", detail=detail)]
 
 
@@ -1931,6 +1962,9 @@ def _git_plumbing_tree(sub, rest, ctx, detail):
     if (sub == "read-tree" and any(a in ("-u", "--reset") for a in rest)) or \
             (sub == "checkout-index" and any(a in ("-f", "--force", "-a", "--all") for a in rest)):
         return [Effect("edit", UNKNOWN, detail=detail + " (rewrites the working tree)", certain=False)]
+    if sub == "worktree" and rest[:1] == ["remove"]:
+        pos = _positionals(rest[1:], set())
+        return [Effect("delete", ctx.N(p), detail=detail) for p in pos] or [Effect("delete", UNKNOWN, detail=detail, certain=False)]
     if sub == "worktree" and rest[:1] == ["add"]:
         pos = _positionals(rest[1:], {"-b", "-B", "--reason"})
         return [Effect("write", ctx.N(pos[0]) if pos else UNKNOWN, detail=detail)]
@@ -2004,6 +2038,8 @@ def _git_stash(sub, rest, ctx, detail):
 def _git_history(sub, rest, ctx, detail):
     if sub == "commit" and "--amend" not in rest:
         return [Effect("commit", "HEAD", kind="branch", detail=detail)]
+    if sub == "commit":          # --amend records a new commit *and* rewrites the previous one
+        return [Effect("commit", "HEAD", kind="branch", detail=detail), Effect("history_rewrite", "HEAD", kind="branch", detail=detail)]
     return [Effect("history_rewrite", "HEAD", kind="branch", detail=detail)]
 
 
@@ -2204,7 +2240,7 @@ def _h_gh(cmd, args, ctx, stdin, detail):
 _PIP_VALS = {"-i", "--index-url", "--extra-index-url", "-f", "--find-links", "-t", "--target", "--prefix", "--root",
              "--src", "-d", "--dest", "--platform", "--python-version", "--implementation", "--abi", "--log", "--cache-dir",
              "--trusted-host", "--progress-bar", "--proxy", "--timeout", "--retries", "--python"}
-_REGISTRY = {"pip": "pypi.org", "uv": "pypi.org", "pipx": "pypi.org", "poetry": "pypi.org", "pipenv": "pypi.org",
+_REGISTRY = {"pip": "pypi.org", "bundle": "rubygems.org", "snap": "snapcraft.io", "uv": "pypi.org", "pipx": "pypi.org", "poetry": "pypi.org", "pipenv": "pypi.org",
              "npm": "registry.npmjs.org", "yarn": "registry.npmjs.org", "pnpm": "registry.npmjs.org", "bun": "registry.npmjs.org"}
 
 
@@ -2355,7 +2391,24 @@ def _h_pkg_other(cmd, args, ctx, stdin, detail):
     rest = _positionals(args[args.index(verb) + 1:] if verb in args else [], {"-p", "--manifest-path", "--version", "--git", "--branch", "--tag"})
     if any(a in ("--help", "-h", "--version", "-V") for a in args) and verb in ("", "help"):
         return [Effect("run", detail, kind="command", detail=detail)]
-    installs = {"pip": ("install",), "pip3": ("install",), "cargo": ("add", "install"), "gem": ("install",), "apt": ("install", "upgrade", "full-upgrade", "dist-upgrade"),
+    if cmd == "pacman":
+        if any(re.fullmatch(r"-S[a-zA-Z]*", a) and not re.search(r"[sigcp]", a[2:]) or a in ("-U", "--sync", "--upgrade") for a in args):
+            return _install_effects([p for p in pos], "archlinux.org", detail)
+        if any(re.fullmatch(r"-R[a-zA-Z]*", a) or a == "--remove" for a in args):
+            return [Effect("delete", "package/" + " ".join(pos), kind="package", detail=detail)]
+        return [Effect("run", detail, kind="command", detail=detail)]
+    if cmd == "nix-env" and any(a in ("-i", "--install", "-iA") or re.fullmatch(r"-i[A-Za-z]*", a) for a in args):
+        return _install_effects(pos, "nixos.org", detail)
+    if cmd == "rustup" and (pos[:2] in (["toolchain", "install"], ["component", "add"], ["target", "add"]) or pos[:1] in (["install"], ["update"])):
+        return _install_effects(pos[2:] or pos[1:], "rust-lang.org", detail)
+    if cmd == "corepack" and pos[:1] in (["enable"], ["prepare"], ["install"], ["use"]):
+        return _install_effects(pos[1:] or ["corepack"], "registry.npmjs.org", detail)
+    if cmd == "mvn" and any(a.startswith(("dependency:get", "dependency:copy", "install:install-file")) for a in args):
+        return _install_effects([a for a in args if a.startswith("-Dartifact=")] or ["maven"], "repo.maven.apache.org", detail)
+    if cmd == "dotnet" and pos[:1] == ["add"] and "package" in pos:
+        return _install_effects(pos[pos.index("package") + 1:], "nuget.org", detail)
+    installs = {"pip": ("install",), "pip3": ("install",), "bundle": ("add", "install", "update"), "snap": ("install", "refresh"),
+                "gem": ("install",), "cargo": ("add", "install"), "gem": ("install",), "apt": ("install", "upgrade", "full-upgrade", "dist-upgrade"),
                 "apt-get": ("install", "upgrade", "dist-upgrade"), "brew": ("install", "upgrade", "reinstall", "tap"), "poetry": ("add", "install", "update", "lock"),
                 "conda": ("install", "update", "create"), "go": ("get", "install"), "pipenv": ("install", "update", "sync"), "composer": ("require", "install", "update"),
                 "dnf": ("install", "upgrade"), "yum": ("install", "update"), "apk": ("add",), "pacman": ("-S",), "dotnet": ("add",), "mamba": ("install",)}
@@ -3064,7 +3117,7 @@ def _interpreter(cmd, args, ctx, stdin, detail):
     lang = "python" if cmd.startswith(("python", "pypy")) else _LANG_OF.get(cmd, cmd)
     if args and all(a in _PROBE_FLAGS or (a == "-v" and lang != "python") for a in args):
         return [Effect("run", detail, kind="command", detail=detail)]       # version / help probe
-    if lang == "perl" and any((a.startswith("-p") or a.startswith("-n")) and "i" in a or a.startswith("-i") for a in args):
+    if lang in ("perl", "ruby") and any((a.startswith("-p") or a.startswith("-n")) and "i" in a or a.startswith("-i") for a in args):
         files = [p for p in _paths_after_opts(args) if not re.match(r"^[sy]/|^tr/", p)]
         inline = [args[k + 1] for k, a in enumerate(args) if a in ("-e", "-pe", "-pie", "-E") and k + 1 < len(args)]
         files = [f for f in files if f not in inline]
@@ -3244,6 +3297,8 @@ _HANDLERS = {
     "cargo": _h_pkg_other, "gem": _h_pkg_other, "apt": _h_pkg_other, "apt-get": _h_pkg_other, "brew": _h_pkg_other,
     "poetry": _h_pkg_other, "conda": _h_pkg_other, "mamba": _h_pkg_other, "go": _h_pkg_other, "pipenv": _h_pkg_other,
     "composer": _h_pkg_other, "dnf": _h_pkg_other, "yum": _h_pkg_other, "apk": _h_pkg_other, "pacman": _h_pkg_other,
+    "bundle": _h_pkg_other, "snap": _h_pkg_other, "nix-env": _h_pkg_other, "rustup": _h_pkg_other, "corepack": _h_pkg_other,
+    "mvn": _h_pkg_other, "dotnet": _h_pkg_other,
     "uv": _h_uv, "uvx": _h_uv, "pipx": _h_pipx,
     "make": _h_make, "gmake": _h_make,
     "twine": _h_twine,

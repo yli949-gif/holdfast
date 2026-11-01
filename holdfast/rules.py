@@ -14,7 +14,7 @@ from .effects import Effect, EVERYTHING, UNKNOWN, action_matches
 
 KINDS = ("forbid", "confirm", "require_before", "freeze")
 # "prod" must be a whole path segment / token (prod/, .env.production, k8s-production) — not a substring of product.py
-PROD_PATTERN = r"(?:^|[/._\-\s=:])prod(?:uction)?(?:[/.\-\s:]|$)"
+PROD_PATTERN = r"(?:^|[/._\-\s=:@])prod(?:uction)?(?:[/.\-\s:&]|$)"
 EXPIRES = ("", "next_turn")   # "" = standing rule; "next_turn" = temporary hold, lapses at the next user prompt that asks for work
 
 
@@ -561,6 +561,8 @@ def _prod_rules(ctx: _Ctx, kind: str, frag: str, expires: str = "") -> bool:
     ctx.add(kind, "modify", Scope(pattern=PROD_PATTERN), frag=frag, expires=expires)
     ctx.add(kind, "deploy", Scope(pattern=PROD_PATTERN), frag=frag, expires=expires)
     ctx.add(kind, "run", Scope(command=r"\bprod(uction)?\b"), frag=frag, expires=expires)
+    # pushing to a production branch / remote and talking to production hosts or endpoints touch prod too
+    ctx.add(kind, "network", Scope(pattern=PROD_PATTERN), frag=frag, expires=expires)
     return True
 
 
