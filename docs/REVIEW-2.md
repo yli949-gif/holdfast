@@ -411,3 +411,30 @@ Bare Python start-up is 25 ms, and `import holdfast.hook` is 62 ms. That import 
 4. **N6**: revert the "project imports are plain runs" shortcut, or resolve the imports to files.
 5. **N7 + N8**: expire holds on an explicit release, not on message count.
 6. Then O1 and N13 (over-blocking), B3, B4, B7 and B20.
+
+## Resolution (2026-10-31, commits 3ed8363 … 8ea2fa6)
+
+Scope: every Critical/High item (new findings N1–N7; review-1 items still open or partial at High: B1, B3, B4, B7,
+B8, T1, S2, O1). Each fix has a regression test in `tests/test_hardening.py` that replays the sequence above
+against a real git repo + bare remote and executes every allowed command.
+
+| ID | Status | Fix |
+|----|--------|-----|
+| N1 | Fixed | State in `<git-dir>/holdfast/` (never tracked/stashed/cleaned/reset); backup copy per save; whole-tree deletes and ancestors of the state dir are self-protected |
+| N2 | Fixed | Grants carry the blocked call's targets, expire at the next user turn, are consumed only when the whole call is allowed |
+| N3 | Fixed | Affirmation must be short, single-line, unhedged; go-aheads vetoed by except/but not/negation and "remove X from"; no untargeted delete go-ahead; prefix-only coverage |
+| N4 | Fixed | Only a standalone full-suite run counts; file / node id / -k / -m / --deselect / --lf are `partial` |
+| N5 | Fixed | Pass stamped at run start; pull/merge/rebase/stash pop/checkout/reset make it stale; red full run clears it |
+| N6 | Fixed | Project imports resolved and scanned transitively; `python -m <project module>` scanned; importing holdfast is self-protection |
+| N7 | Fixed | Questions never lift holds; "until I've reviewed" needs explicit go-ahead; action holds need that action's go-ahead |
+| B1 | Fixed | via N1, N6, N11 |
+| B3 | Fixed | `.git/hooks/**`, `.git/config` and git config keys git executes (hooksPath, filters, drivers, pagers, `-c`) are self-protected |
+| B4 | Fixed | `cp -l/-al/-s/--link`, `link`, `os.link/os.symlink` modelled as links |
+| B7 | Fixed | merge/rebase/cherry-pick/revert/stash pop/checkout <branch> report changed paths from git; pull/read-tree -u/checkout-index -f an uncertain edit |
+| B8 | Fixed | `gh api` with a mutating method or fields counts as a push |
+| T1 | Fixed | via N4/N10 (chained commands, `| sed`, echo/cat/print forgeries, `npm test` = `echo ok` no longer count) |
+| S2 | Fixed | Missing primary restored from backup; corrupt with no backup fails closed until `holdfast: reset` |
+| O1 | Partially fixed | Fully analysed sh/python scripts, python checkers (mypy, pylint, ...) and read-only MCP tools no longer ask; `npm run build`, `node server.js`, `npx <tool>` still ask |
+| N8, N9, N10, N11, N14, N15, S3 | Fixed (Medium/Low, fixed with the above) | |
+
+Still open (Medium/Low, out of this scope): B15, B16, B17 (explicit `tests/` form), B18/O4, B20 (overwrite as destruction — the one remaining red-team bypass, `sed -i 'd'`), N12, N13 remainder, N16 (latency 63–76 ms vs 50 ms target), F2, O2, O5, O6, S4, S5 (audit log no longer committable, still stores full tool_input), Q*.
