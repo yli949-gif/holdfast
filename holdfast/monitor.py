@@ -143,9 +143,19 @@ def _guard_hit(e: Effect, root: str | None, sdir: str | None) -> bool:
         return False
     if real == sdir or real.startswith(sdir + os.sep):
         return True
+    for protected in _protected_dirs():
+        if real == protected or real.startswith(protected + os.sep) or \
+                (e.action in ("delete", "move", "discard") and protected.startswith(real.rstrip(os.sep) + os.sep)):
+            return True       # the guard's own code (editable install or site-packages) and its sentinel store
     # deleting/moving an ancestor (`rm -rf .`, `mv .git /tmp`) takes the state with it; git's own commands never
     # touch the git directory (`git clean -fdx` on "." is not an attack on .git/holdfast)
     return e.action in ("delete", "move", "discard") and sdir.startswith(real.rstrip(os.sep) + os.sep) and not_git
+
+
+def _protected_dirs() -> list[str]:
+    from .state import sentinel_dir
+    pkg = os.path.realpath(os.path.dirname(os.path.abspath(__file__)))
+    return [pkg, os.path.realpath(str(sentinel_dir()))]
 
 
 def _state_dir_real(root: str | None) -> str | None:
@@ -162,6 +172,46 @@ def _is_artifact(target: str) -> bool:
 
 def rules_of(state: dict) -> list[Rule]:
     return [Rule.from_dict(r) for r in state.get("rules", [])]
+
+
+def _git(root: str | None, *args: str) -> str | None:
+    import subprocess
+    if not root:
+        return None
+    try:
+        p = subprocess.run(["git", "-C", root, *args], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
+_TEST_CONFIG = ["pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini", ":(glob)**/conftest.py", ":(glob)**/pytest.ini", "jest.config.js",
+                "jest.config.ts", "vitest.config.ts", "vitest.config.js", "package.json", ".mocharc.json", ".mocharc.yml", "noxfile.py"]
+
+
+def working_tree_id(root: str | None) -> str | None:
+    """Tree object of the tracked working tree (index + uncommitted edits), or None outside git."""
+    head = _git(root, "rev-parse", "--verify", "-q", "HEAD^{tree}")
+    if head is None:
+        return None
+    stash = _git(root, "stash", "create")
+    return _git(root, "rev-parse", f"{stash}^{{tree}}") if stash else head
+
+
+def test_config_modified(root: str | None) -> bool:
+    """Uncommitted changes to test configuration (addopts, testpaths, conftest...) can make a 'full' run partial."""
+    if _git(root, "rev-parse", "--verify", "-q", "HEAD") is None:
+        return False
+    out = _git(root, "diff", "--name-only", "HEAD", "--", *_TEST_CONFIG)
+    new = _git(root, "ls-files", "--others", "--exclude-standard", "--", *_TEST_CONFIG)
+    return bool(out) or bool(new)
+
+
+def _push_source_trees(e: Effect, root: str | None) -> list[str] | None:
+    m = re.search(r"\[src=([^\]]*)\]", e.detail or "")
+    src = (m.group(1) if m else "") or "HEAD"
+    tree = _git(root, "rev-parse", "--verify", "-q", f"{src}^{{tree}}")
+    return [tree] if tree else None
 
 
 def _tests_fresh(state: dict) -> bool:
@@ -242,9 +292,21 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
                     cand = Decision("deny", f"Holdfast rule {rule.id}: {rule.describe()} (user said: \"{rule.text}\"). "
                                              f"Blocked effect: {e.action} {e.target}. Adjust your approach instead of editing frozen files.", rule.id, effects)
             elif rule.kind == "require_before":
-                if rule.prerequisite == "tests_pass" and not _tests_fresh(state):
+                stale_tree = None
+                if rule.prerequisite == "tests_pass" and _tests_fresh(state) and state.get("tests_passed_tree") \
+                        and e.action in ("push", "force_push"):
+                    trees = _push_source_trees(e, root)
+                    if trees is None or any(t != state["tests_passed_tree"] for t in trees):
+                        stale_tree = True   # pushing commits whose content is not what the green run tested
+                if rule.prerequisite == "tests_pass" and stale_tree:
+                    cand = Decision("deny", f"Holdfast rule {rule.id}: {rule.describe()}. The commit being pushed does not "
+                                            "contain exactly the code the last green test run tested (different branch, a "
+                                            "partial commit, or changes since). Commit what you tested, or re-run the suite.",
+                                    rule.id, effects)
+                elif rule.prerequisite == "tests_pass" and not _tests_fresh(state):
                     if (state.get("tests_partial_at") or 0) > (state.get("tests_passed_at") or 0):
-                        why = "The last green run was partial (a file, -k/-m, --lf, --deselect...); run the whole suite."
+                        why = ("The last green run was partial (a file, -k/-m, --lf, --deselect, selecting options or "
+                               "uncommitted test-config changes); run the whole suite.")
                     elif state.get("tests_passed_at"):
                         why = "Tests have not passed since the last edit or tree-changing git command; run the test suite first."
                     else:
@@ -326,11 +388,15 @@ def observe_post(tool_name: str, tool_input: dict, tool_response: dict | str, st
         if failed and ok is not None:
             ok = False
         kind = test_run_kind(cmd, cwd, root) if ok is not None else ""
+        if ok is True and kind == FULL and test_config_modified(root):
+            kind = PARTIAL                       # uncommitted addopts/testpaths/conftest changes may select a subset
+            state["tests_partial_reason"] = "test configuration has uncommitted changes"
         if ok is True and kind == FULL and not resp.get("interrupted") and not _prints_fake_summary(cmd):
             # stamped with the time the run *started*: an edit that lands while it runs makes it stale (N5 race)
             ts = started if started else now
             state["tests_passed_at"] = ts
             changed["tests_passed_at"] = ts
+            state["tests_passed_tree"] = state.get("test_started_tree", {}).pop(tool_use_id, None) or working_tree_id(root)
         elif ok is True and kind == PARTIAL:
             state["tests_partial_at"] = now
             changed["tests_partial_at"] = now
@@ -489,6 +555,8 @@ def handle_prompt(prompt: str, state: dict, cfg: Config) -> dict:
         state["integrity_reset"] = state.pop("integrity_lost")
 
     pending = state.get("pending_confirm")
+    if pending and pending.get("turn") is not None and state["turn"] > pending["turn"] + 1:
+        state["pending_confirm"] = pending = None    # only the reply right after the blocked call can confirm it
     if pending:
         if is_affirmation(p):
             state.setdefault("confirmations", {})[pending["rule_id"]] = {

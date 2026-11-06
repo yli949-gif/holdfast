@@ -147,6 +147,27 @@ def resolve_on_disk(effects: list[Effect], cwd: str, project_root: str | None = 
     return out
 
 
+def _edit_empties(path: str, tool: str, ti: dict) -> bool:
+    """Would this Edit/MultiEdit leave a non-empty file empty (content destroyed, like `: > f`)?"""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) > 2_000_000:
+            return False
+        text = open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return False
+    if not text.strip():
+        return False
+    edits = ti.get("edits") if tool == "MultiEdit" else [ti]
+    for ed in edits or []:
+        if not isinstance(ed, dict):
+            return False
+        old, new = ed.get("old_string") or "", ed.get("new_string") or ""
+        if not old or old not in text:
+            return False
+        text = text.replace(old, new) if ed.get("replace_all") else text.replace(old, new, 1)
+    return not text.strip()
+
+
 def effect_from_tool(tool_name: str, tool_input: dict, cwd: str, project_root: str | None = None) -> list[Effect]:
     """Map a non-Bash Claude Code tool call to effects."""
     from .shell import classify_command  # local import to avoid cycle
@@ -157,7 +178,10 @@ def effect_from_tool(tool_name: str, tool_input: dict, cwd: str, project_root: s
         return classify_command(cmd, cwd, project_root)
     if t in ("Edit", "MultiEdit", "NotebookEdit"):
         fp = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
-        return resolve_on_disk([Effect("edit", normalize_path(fp, cwd, project_root), detail=f"{t} {fp}")], cwd, project_root)
+        effs = [Effect("edit", normalize_path(fp, cwd, project_root), detail=f"{t} {fp}")]
+        if t in ("Edit", "MultiEdit") and _edit_empties(fp if os.path.isabs(fp) else os.path.join(cwd or "", fp), t, tool_input):
+            effs.append(Effect("delete", normalize_path(fp, cwd, project_root), detail=f"{t} {fp} (leaves the file empty)"))
+        return resolve_on_disk(effs, cwd, project_root)
     if t == "Write":
         fp = tool_input.get("file_path", "")
         effs = [Effect("write", normalize_path(fp, cwd, project_root), detail=f"Write {fp}")]

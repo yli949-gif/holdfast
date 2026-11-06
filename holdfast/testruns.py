@@ -15,7 +15,9 @@ import shlex
 
 FULL, PARTIAL = "full", "partial"
 
-_PIPE_TAIL = re.compile(r"^\s*(?:tail|head|cat)(?:\s+(?:-n\s*\d+|-\d+|-n\d+|-c\s*\d+|-q))*\s*$")
+# only filters that keep the END of the output (where the runner prints its summary) — `| head` can cut off the
+# failures and leave only early PASSED lines
+_PIPE_TAIL = re.compile(r"^\s*(?:tail(?:\s+(?:-n\s*\d+|-\d+|-n\d+|-q))*|cat)\s*$")
 _LEAD_CD = re.compile(r"^\s*cd\s+([^\s;&|<>`$()]+)\s*&&\s*")
 _RUNNER_TOKEN = re.compile(r"(?:^|[\s/])(?:pytest|py\.test|jest|vitest|mocha|ava|tap|karma|playwright test|cypress run|"
                            r"node --test|go test|cargo test|rspec|phpunit|tox|nox|react-scripts test|ng test|unittest)\b")
@@ -26,7 +28,11 @@ _PYTEST_VAL = {"-c", "--rootdir", "-p", "-n", "--numprocesses", "--maxfail", "-W
                "--durations", "--color", "--junitxml", "--junit-xml", "--cov", "--cov-report", "--log-level", "-r",
                "--basetemp", "--confcutdir", "--import-mode", "--capture", "--dist", "--timeout", "--reruns", "--count"}
 _PYTEST_PARTIAL = {"-k", "-m", "--deselect", "--lf", "--last-failed", "--sw", "--stepwise", "--sw-skip", "--ignore",
-                   "--ignore-glob", "--only-rerun", "--nf"}
+                   "--ignore-glob", "--only-rerun", "--nf", "-c", "--config-file", "-o", "--override-ini", "--rootdir",
+                   "--confcutdir", "--noconftest", "--pyargs", "-p", "--continue-on-collection-errors", "--co"}
+# environment variables that change which tests a runner selects
+_SELECTING_ENV = re.compile(r"^(?:PYTEST_ADDOPTS|PYTEST_PLUGINS|PYTEST_DISABLE_PLUGIN_AUTOLOAD|JEST_\w+|VITEST_\w+|MOCHA_\w+|GOFLAGS|"
+                            r"CARGO_\w+|RUST_TEST_\w+|TOX_\w+|NOX_\w+|PY_COLORS)=")
 _JS_PARTIAL = {"-t", "--testNamePattern", "--grep", "-g", "--testPathPattern", "--findRelatedTests", "--onlyChanged", "-o",
                "--changedSince", "--onlyFailures", "-f", "--related", "--project", "--shard"}
 
@@ -58,6 +64,8 @@ def _argv(s: str) -> list[str] | None:
     except ValueError:
         return None
     while argv and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[0]):
+        if _SELECTING_ENV.match(argv[0]) and not argv[0].startswith("PY_COLORS="):
+            return ["__partial__"]
         argv = argv[1:]
     if argv[:1] == ["timeout"] and len(argv) > 2:
         argv = argv[2:]
@@ -125,6 +133,10 @@ def test_run_kind(cmd: str, cwd: str | None = None, root: str | None = None) -> 
         return ""
     base = os.path.join(cwd or root or ".", cd) if cd else (cwd or root or ".")
     proj = root or base
+    if argv == ["__partial__"]:
+        return PARTIAL
+    if os.environ.get("PYTEST_ADDOPTS") or os.environ.get("PYTEST_PLUGINS"):
+        return PARTIAL                       # the session itself was started with selecting options
     head = os.path.basename(argv[0])
     args = argv[1:]
     if re.match(r"^python[\d.]*$|^pypy3?$", head):

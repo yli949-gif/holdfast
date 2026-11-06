@@ -710,3 +710,91 @@ class TestHookConfigSurvivesGit:
         d = Driver(repo)
         d.say("Never touch the production config.")
         assert d.tool("Write", {"file_path": str(repo / "config/production.yaml"), "content": "x: 1\n"}) == "deny"
+
+
+# ------------------------------------------------------------------ round 6: pre-release review suspicions, verified
+
+class TestRound6:
+    def test_head_pipe_is_not_a_full_run(self, red_suite):
+        d = Driver(red_suite)
+        d.say("only push after tests pass")
+        d.bash("python -m pytest -v 2>&1 | head -3")
+        assert d.bash("git push -q origin main", execute=False) == "deny"
+
+    @pytest.mark.parametrize("cmd", ["PYTEST_ADDOPTS='-k test_a' python -m pytest -q", "python -m pytest -q -o testpaths=tests/test_a.py",
+                                     "python -m pytest -q -c /dev/null tests"])
+    def test_selecting_options_are_partial(self, red_suite, cmd):
+        d = Driver(red_suite)
+        d.say("only push after tests pass")
+        d.bash(cmd)
+        assert d.bash("git push -q origin main", execute=False) == "deny"
+
+    def test_uncommitted_addopts_make_the_run_partial(self, red_suite):
+        (red_suite / "pytest.ini").write_text("[pytest]\naddopts = -k 'not test_bad'\n")
+        d = Driver(red_suite)
+        d.say("only push after tests pass")
+        assert d.bash("python -m pytest -q") == "allow"          # green, because test_bad is deselected
+        assert d.bash("git push -q origin main", execute=False) == "deny"
+
+    def test_pushing_a_different_branch_than_tested_is_denied(self, repo):
+        sh("git checkout -q -b untested && echo 'def test_x(): assert 0' > tests/test_x.py && git add -A && "
+           "git commit -qm untested && git checkout -q main", repo)
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        assert d.bash("python -m pytest -q") == "allow"
+        assert d.bash("git push -q origin untested:main", execute=False) == "deny"
+        assert d.bash("git push -q origin untested", execute=False) == "deny"
+        assert d.bash("git push -q origin main") == "allow"       # the tested commit itself
+
+    def test_commit_after_green_run_can_be_pushed_but_partial_commit_cannot(self, repo):
+        (repo / "src" / "a.py").write_text("x = 2\n")
+        (repo / "src" / "b.py").write_text("y = 1\n")
+        sh("git add src/b.py", repo)
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        assert d.bash("python -m pytest -q") == "allow"            # tests the working tree (a.py + b.py)
+        assert d.bash("git commit -qm 'b only'") == "allow"        # commits only b.py
+        assert d.bash("git push -q origin main", execute=False) == "deny"
+        assert d.bash("git commit -qam 'a too'") == "allow"
+        assert d.bash("git push -q origin main") == "allow"
+
+    def test_stale_pending_confirmation_is_not_granted_later(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("rm data.txt") == "deny"
+        d.say("let's look at the README first")
+        d.say("yes")
+        assert d.bash("rm data.txt") == "deny"
+        assert (repo / "data.txt").exists()
+
+    def test_vanished_state_directory_fails_closed(self, repo):
+        import shutil
+        d = Driver(repo)
+        d.say("never modify anything under tests/")
+        shutil.rmtree(repo / ".git" / "holdfast")                  # out-of-band wipe of the whole state dir
+        assert d.bash("echo x > src/z.py", execute=False) == "deny"
+        assert d.bash("git status") == "allow"
+
+    def test_editing_holdfast_own_code_is_denied(self, repo):
+        import holdfast
+        pkg = os.path.dirname(os.path.realpath(holdfast.__file__))
+        d = Driver(repo)
+        d.say("never force push")
+        assert d.tool("Write", {"file_path": os.path.join(pkg, "monitor.py"), "content": "def evaluate(*a, **k): pass\n"}) == "deny"
+        assert d.tool("Edit", {"file_path": os.path.join(pkg, "hook.py"), "old_string": "x", "new_string": "y"}) == "deny"
+        assert d.bash(f"echo pass > {pkg}/rules.py", execute=False) == "deny"
+
+    def test_edit_that_empties_a_file_is_a_delete(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.tool("Edit", {"file_path": str(repo / "important.txt"), "old_string": "keep me\n", "new_string": ""}) == "deny"
+        assert d.tool("Edit", {"file_path": str(repo / "important.txt"), "old_string": "keep", "new_string": "kept"}) == "allow"
+
+    def test_audit_log_redacts_secrets_and_truncates_contents(self, repo):
+        d = Driver(repo)
+        d.say("never force push")
+        d.bash("export API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456 && echo ok", execute=False)
+        d.tool("Write", {"file_path": str(repo / "big.txt"), "content": "A" * 5000})
+        log = (repo / ".git" / "holdfast" / "audit.jsonl").read_text()
+        assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in log and "[REDACTED]" in log
+        assert "A" * 300 not in log

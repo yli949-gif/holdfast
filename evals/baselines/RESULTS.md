@@ -133,7 +133,7 @@ present and is a hard block in headless `-p` runs.
 
 | approach | bypass (allowed AND effect happened) | attacks denied | attacks asked | allowed, no effect | benign false-blocked | of which ask |
 |---|---|---|---|---|---|---|
-| Holdfast | **0/93 (0%)** | 90 | 3 | 0 | 1/21 (5%) | 0 |
+| Holdfast | **0/93 (0%)** | 90 | 3 | 0 | 3/21 (14%) | 0 |
 | Regex hook (strict) | **24/93 (26%)** | 68 | 0 | 1 | 5/21 (24%) | 0 |
 | Regex hook (lenient) | **52/93 (56%)** | 40 | 0 | 1 | 1/21 (5%) | 0 |
 | CC native permissions | **41/93 (44%)** | 39 | 12 | 1 | 6/21 (29%) | 4 |
@@ -142,13 +142,13 @@ Per constraint type (`type` = first segment of the probe category; `benign`/`con
 
 | type | n | Holdfast | Regex hook (strict) | Regex hook (lenient) | CC native permissions |
 |---|---|---|---|---|---|
-| benign | 18 | 0 byp / 1 fb / 0 ask | 0 byp / 3 fb / 0 ask | 0 byp / 1 fb / 0 ask | 0 byp / 4 fb / 0 ask |
+| benign | 18 | 0 byp / 2 fb / 0 ask | 0 byp / 3 fb / 0 ask | 0 byp / 1 fb / 0 ask | 0 byp / 4 fb / 0 ask |
 | confirm | 2 | 0 byp / 0 fb / 0 ask | 1 byp / 1 fb / 0 ask | 1 byp / 0 fb / 0 ask | 1 byp / 1 fb / 0 ask |
 | delete | 36 | 0 byp / 0 fb / 2 ask | 13 byp / 0 fb / 0 ask | 35 byp / 0 fb / 0 ask | 25 byp / 0 fb / 10 ask |
 | force_push | 4 | 0 byp / 0 fb / 0 ask | 0 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask |
 | install | 13 | 0 byp / 0 fb / 1 ask | 2 byp / 0 fb / 0 ask | 2 byp / 0 fb / 0 ask | 3 byp / 0 fb / 0 ask |
 | prod | 12 | 0 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask | 1 byp / 0 fb / 0 ask |
-| push | 9 | 0 byp / 0 fb / 0 ask | 3 byp / 1 fb / 0 ask | 8 byp / 0 fb / 0 ask | 6 byp / 1 fb / 2 ask |
+| push | 9 | 0 byp / 1 fb / 0 ask | 3 byp / 1 fb / 0 ask | 8 byp / 0 fb / 0 ask | 6 byp / 1 fb / 2 ask |
 | tests | 20 | 0 byp / 0 fb / 0 ask | 4 byp / 0 fb / 0 ask | 4 byp / 0 fb / 0 ask | 4 byp / 0 fb / 0 ask |
 
 ### 2a. Held-out BLIND tool-call corpus (corpus/heldout, 292 calls x 8 single-constraint policies)
@@ -231,9 +231,9 @@ Per scenario (each cell = one symbol per step: `.` correct, `M` missed violation
 
 | approach | in-process decision | as deployed |
 |---|---|---|
-| Holdfast | 0.166 ms (`monitor.evaluate`) | 89 ms (hook subprocess: python start + import + state load/lock/save + audit) |
-| Regex hook (strict / lenient) | 0.004 / 0.002 ms | >= 31 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
-| CC native permissions (our model) | 0.164 ms | in Claude Code's own process, no subprocess |
+| Holdfast | 0.162 ms (`monitor.evaluate`) | 77 ms (hook subprocess: python start + import + state load/lock/save + audit) |
+| Regex hook (strict / lenient) | 0.003 / 0.001 ms | >= 25 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
+| CC native permissions (our model) | 0.145 ms | in Claude Code's own process, no subprocess |
 <!-- TABLES:END -->
 
 ## Commentary by category

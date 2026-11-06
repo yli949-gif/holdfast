@@ -68,6 +68,12 @@ def state_dir(cwd: str | None = None, create: bool = True) -> Path:
     return d
 
 
+def sentinel_dir() -> Path:
+    """Out-of-tree record of which sessions have state, so a vanished state directory is detected (fail closed)."""
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    return Path(base) / "holdfast" / "sessions"
+
+
 def team_rules_path(cwd: str | None = None) -> Path:
     """Standing rules a team commits to the repository (optional)."""
     return project_root(cwd) / ".holdfast" / "rules.json"
@@ -112,6 +118,9 @@ class Store:
         self.backup_path = self.dir / "sessions" / f"{self.session_id}.bak.json"
         self.lock_path = self.dir / "sessions" / f"{self.session_id}.lock"
         self.audit_path = self.dir / "audit.jsonl"
+        import hashlib
+        key = hashlib.sha256(f"{os.path.realpath(self.dir)}|{self.session_id}".encode()).hexdigest()[:32]
+        self.sentinel = sentinel_dir() / key
 
     @contextmanager
     def locked(self):
@@ -149,6 +158,8 @@ class Store:
                     pass
         elif self.backup_path.exists():
             incident = "session file missing"
+        elif self.sentinel.exists():
+            incident = "session state directory missing"
         if st is None and incident:
             try:
                 st = self._read(self.backup_path)
@@ -183,6 +194,12 @@ class Store:
     def save(self, state: dict) -> None:
         self._write_atomic(self.path, state)
         self._write_atomic(self.backup_path, state)
+        if state.get("rules") and not self.sentinel.exists():
+            try:
+                self.sentinel.parent.mkdir(parents=True, exist_ok=True)
+                self.sentinel.write_text(str(self.dir) + "\n")
+            except OSError:
+                pass
 
     def _standing_rules(self) -> list[dict]:
         """Standing rules: `<state dir>/rules.json` (`holdfast rules add`) and `<root>/.holdfast/rules.json` (committed)."""
@@ -213,6 +230,26 @@ class Store:
         return out
 
     def audit(self, record: dict) -> None:
-        record = {"ts": time.time(), "session_id": self.session_id, **record}
+        record = {"ts": time.time(), "session_id": self.session_id, **_redact(record)}
         with open(self.audit_path, "a") as f:
             f.write(json.dumps(record) + "\n")
+
+
+_SECRET = re.compile(r"(?i)((?:api[_-]?key|token|secret|passw(?:or)?d|pwd|auth|bearer|credential|private[_-]?key)[\w-]*\s*[=:]\s*|"
+                     r"authorization:\s*(?:bearer|basic)\s+)(['\"]?)[^\s'\"]{4,}")
+_TOKEN = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|"
+                    r"AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})")
+
+
+def _redact(obj, key: str = ""):
+    """Audit records keep what is needed to explain a decision, not file contents or credentials (REVIEW S5)."""
+    if isinstance(obj, dict):
+        return {k: _redact(v, k) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_redact(v, key) for v in obj]
+    if isinstance(obj, str):
+        s = _TOKEN.sub("[REDACTED]", _SECRET.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED]", obj))
+        if key in ("content", "new_string", "old_string", "new_source") and len(s) > 200:
+            s = s[:200] + f"… [{len(obj)} chars]"
+        return s
+    return obj

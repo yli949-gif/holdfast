@@ -1869,8 +1869,9 @@ def _git_push(sub, rest, ctx, detail):
         dst = re.sub(r"^refs/(heads|tags)/", "", dst)
         tgt = f"{remote}/{dst}"
         rewrite = forced or plus or removal or delete
+        srcref = src if (colon or src) and not removal else (current or "HEAD")
         effs.append(Effect("force_push" if rewrite else "push", tgt, kind="branch",
-                           detail=detail + (" (local remote)" if _remote_is_local(remote, ctx) else "")))
+                           detail=detail + (" (local remote)" if _remote_is_local(remote, ctx) else "") + f" [src={srcref}]"))
         if delete or removal:
             effs.append(Effect("delete", tgt, kind="branch", detail=detail))
     return effs
