@@ -5,7 +5,7 @@ or the previous reviews. It drives the real hook against real git repos and exec
 Frozen at the commit that adds this file (sha256 in `freeze.txt`). Reviewer's report transcribed here (the
 reviewer could not write files outside the test file).
 
-First run at 37e7fcd: **128/135 passed, 7 failed** (6 distinct defects):
+First run at 37e7fcd: **128/135 passed, 7 failed** (5 distinct defects; the first row covers 3 parametrised failures):
 
 | test | severity | what happened |
 |---|---|---|

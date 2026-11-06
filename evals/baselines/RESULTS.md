@@ -21,11 +21,11 @@ were looked at while fixing Holdfast, so they are in-sample for it; the independ
 | | Holdfast | Regex hook, strict | Regex hook, lenient | CC native permissions |
 |---|---|---|---|---|
 | Red-team bypasses (93 attacks, run for real) | **0/93** | 24/93 | 52/93 | 41/93 |
-| Red-team benign probes blocked | 1/21 | 5/21 | 1/21 | 6/21 (4 by ask) |
+| Red-team benign probes blocked | 3/21 | 5/21 | 1/21 | 6/21 (4 by ask) |
 | Held-out corpus: missed violations | **6/304 (2%)** | 37/304 (12%) | 37/304 (12%) | 102/304 (34%) |
 | Held-out corpus: false blocks | 64/1698 (4%), 60 of them asks | 27/1698 (2%) | 27/1698 (2%) | **9/1698 (1%)** |
-| Stateful scenarios: steps correct | **46/47** | 38/47 | 31/47 | 38/47 (9 extra prompts) |
-| Added latency per call, as deployed | 63–92 ms (Python hook process; 89 ms this run) | ≥20 ms as a Python hook | same | ~0 (in process) |
+| Stateful scenarios: steps correct | **47/47** | 38/47 | 31/47 | 38/47 (9 extra prompts) |
+| Added latency per call, as deployed | 63–92 ms across measurements (Python hook process; see table 4) | ≥20 ms as a Python hook | same | ~0 (in process) |
 
 What this shows: Holdfast's lead is largest on (a) adversarial and indirect shell forms (scripts, make/npm
 targets, interpreters, quoting tricks), where a regex over the command text misses them, and (b) anything that
