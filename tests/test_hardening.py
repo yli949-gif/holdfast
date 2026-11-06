@@ -824,3 +824,20 @@ class TestChainedRuns:
         d.say("only push after tests pass")
         d.bash(cmd)
         assert d.bash("git push -q origin main", execute=False) == "deny"
+
+
+class TestScriptWrittenInSameCall:
+    def test_heredoc_script_written_and_run_is_analysed(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        ok = "cat > gen.py <<'EOF'\nimport os\nos.makedirs('build', exist_ok=True)\nopen('build/out.txt', 'w').write('ok')\nEOF\npython3 gen.py"
+        assert d.bash(ok) == "allow"
+        bad = "cat > g2.py <<'EOF'\nimport os\nos.remove('important.txt')\nEOF\npython3 g2.py"
+        assert d.bash(bad) == "deny"
+        assert (repo / "important.txt").exists()
+
+    def test_unquoted_heredoc_or_append_stays_unverifiable(self, repo):
+        d = Driver(repo)
+        d.say("don't delete anything without asking me")
+        assert d.bash("cat > g3.py <<EOF\nimport os\nos.remove('$X')\nEOF\npython3 g3.py", execute=False) in ("ask", "deny")
+        assert d.bash("cat >> run.py <<'EOF'\nimport os; os.remove('important.txt')\nEOF\npython3 run.py", execute=False) in ("ask", "deny")

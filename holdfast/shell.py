@@ -428,6 +428,9 @@ class Ctx:
     # absolute paths (or globs; "*" = unknown) written earlier in this command. Shared by every child
     # context: a program file written by an earlier segment must not be read from disk (stale content).
     written: set = field(default_factory=set)
+    # absolute path -> exact content, for files written earlier in this command whose content is visible in the
+    # command itself (`cat > gen.py <<'EOF' … EOF`): read instead of the stale on-disk copy
+    contents: dict = field(default_factory=dict)
 
     def child(self, **kw) -> "Ctx":
         """A new process / subshell: copies of env and functions."""
@@ -479,6 +482,8 @@ class Ctx:
         if not self.fs:
             return None
         ap = self.abs(p)
+        if ap and ap in self.contents:
+            return self.contents[ap]
         if ap and self.stale(ap):
             return None
         base = self.root or self.cwd
@@ -850,6 +855,14 @@ def _exec_simple_inner(lexed: Lexed, toks: list, ctx: Ctx, stdin: Stdin) -> tupl
     # 6. classify
     effs, out = _classify_argv(argv, ctx, stdin, assigns)
     effects += effs
+    # `cat > f <<'EOF' … EOF` (or `cat <<EOF > f`): the new content of f is known exactly
+    outs = [(op, w) for op, w in redirs if op.lstrip("0123456789") in (">", ">>", ">|", "&>", "&>>")]
+    if argv[:1] == ["cat"] and all(a == "-" for a in argv[1:]) and stdin.kind == "text" and len(outs) == 1 \
+            and outs[0][0].lstrip("0123456789") in (">", ">|") and outs[0][1] is not None:
+        ap = ctx.abs(_expand_one(outs[0][1], ctx, subvals))
+        quoted = all(not (w is not None and w.heredoc >= 0 and not lexed.heredocs[w.heredoc][1]) for op, w in redirs)
+        if ap and quoted:
+            ctx.contents[ap] = stdin.text
     return effects, out
 
 
