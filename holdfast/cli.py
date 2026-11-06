@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import os
 import sys
 from pathlib import Path
@@ -18,7 +19,8 @@ def hooks_config(python: str = "python3", hook_py: str | None = None, timeout: i
     hp = hook_py or str(HOOK_PY)
     cfg = {}
     for ev in EVENTS:
-        entry = {"type": "command", "command": f"{python} {hp} {ev}", "timeout": timeout}
+        # quoted: interpreter and package paths with spaces ("~/My Projects/.venv") must not split the command
+        entry = {"type": "command", "command": f"{shlex.quote(python)} {shlex.quote(hp)} {ev}", "timeout": timeout}
         if ev == "PreToolUse":
             entry["onFailure"] = "block"   # fail closed if the hook itself crashes (Claude Code ≥ 2.1.295)
         block = {"hooks": [entry]}

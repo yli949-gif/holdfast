@@ -798,3 +798,11 @@ class TestRound6:
         log = (repo / ".git" / "holdfast" / "audit.jsonl").read_text()
         assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in log and "[REDACTED]" in log
         assert "A" * 300 not in log
+
+
+def test_hook_commands_survive_paths_with_spaces():
+    import shlex
+    from holdfast.cli import hooks_config
+    cfg = hooks_config(python="/Users/x/My Projects/.venv/bin/python", hook_py="/Users/x/My Projects/hf/hook.py")
+    cmd = cfg["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert shlex.split(cmd) == ["/Users/x/My Projects/.venv/bin/python", "/Users/x/My Projects/hf/hook.py", "PreToolUse"]
