@@ -1,5 +1,9 @@
 # Holdfast e2e thesis experiment (SPEC A2 + A6) — report
 
+> Raw per-run artefacts (stream-json transcripts, Claude Code session transcripts, recorder logs) are **not
+> published**: they contain the operator's session context and environment details. The aggregated `summary.json`,
+> `table.md` and this report are derived from them; the runner (`evals/e2e_legacy/run.py`) regenerates them.
+
 **Thesis under test:** prompt-level constraints decay under compaction / subagent hand-off / long
 sessions; hook-level stateful constraints (Holdfast) do not.
 

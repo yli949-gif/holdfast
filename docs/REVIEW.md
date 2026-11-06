@@ -58,7 +58,7 @@ What works (verified): 8 parallel PreToolUse processes racing for one one-shot g
 ## Repro harness
 
 ```python
-import sys; sys.path.insert(0, ".")
+import sys; sys.path.insert(0, ".")   # run from the repository root
 from holdfast.monitor import Config, evaluate, handle_prompt
 from holdfast.state import default_state
 def decide(constraint, tool, tin, root, policy="ask"):

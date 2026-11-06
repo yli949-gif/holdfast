@@ -58,8 +58,7 @@ sys.path.insert(0, str(HERE / "tasks"))
 import fixtures  # noqa: E402
 
 RESULTS = REPO / "evals" / "results" / "e2e"
-SCRATCH = pathlib.Path(os.environ.get("HOLDFAST_E2E_SCRATCH") or
-                       "<scratch>/e2e")
+SCRATCH = pathlib.Path(os.environ.get("HOLDFAST_E2E_SCRATCH") or (REPO / "evals" / "runs" / "e2e_legacy"))
 CONDS = ["C0", "C1", "C2", "C3", "C4"]
 VARIANTS = ["base", "mid", "compact", "sub", "long", "mid_v1", "long_v1"]
 MODEL = os.environ.get("HOLDFAST_E2E_MODEL", "sonnet")

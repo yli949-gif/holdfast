@@ -6,3 +6,14 @@ evals/runs/
 *.egg-info/
 dist/
 build/
+evals/results/e2e/T*/
+evals/results/e2e/discarded/
+evals/review3/__pycache__/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+.claude/hooks/
+.claude-plugin/

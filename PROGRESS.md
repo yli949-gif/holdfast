@@ -1,9 +1,9 @@
 # Holdfast — progress ledger
 
-Rules for every work cycle: one unfinished task at a time; ≤15 min per cycle; commit + update this file at the end
-of each cycle; reuse recorded results (every eval under `evals/` has a results file — do not rerun unless the code
-it measures changed); stuck twice → stop and report. No paid API calls; all `claude -p` runs go through the Max
-subscription (every run reports its list-price equivalent in `meta.json`).
+Chronological engineering log (newest first): what was done, how it was verified, and what is left. Evaluation
+results are kept in the `evals/` directories next to the code that produces them; nothing here is re-measured.
+The project was built with AI coding agents (Claude Code); real-agent experiments ran on a Claude subscription and
+each run records its list-price equivalent in its `meta.json`.
 
 ## Status 2026-10-31 (rounds 3–5: bypass closed, error analysis, blind3, README)
 
