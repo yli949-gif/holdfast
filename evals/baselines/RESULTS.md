@@ -231,9 +231,9 @@ Per scenario (each cell = one symbol per step: `.` correct, `M` missed violation
 
 | approach | in-process decision | as deployed |
 |---|---|---|
-| Holdfast | 0.190 ms (`monitor.evaluate`) | 86 ms (hook subprocess: python start + import + state load/lock/save + audit) |
-| Regex hook (strict / lenient) | 0.004 / 0.002 ms | >= 25 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
-| CC native permissions (our model) | 0.157 ms | in Claude Code's own process, no subprocess |
+| Holdfast | 0.173 ms (`monitor.evaluate`) | 80 ms (hook subprocess: python start + import + state load/lock/save + audit) |
+| Regex hook (strict / lenient) | 0.004 / 0.001 ms | >= 19 ms if written as a Python hook (measured floor: python start + json + one regex); a compiled (Go) hook such as hookguard would be a few ms |
+| CC native permissions (our model) | 0.151 ms | in Claude Code's own process, no subprocess |
 <!-- TABLES:END -->
 
 ## Commentary by category

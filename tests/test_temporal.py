@@ -171,14 +171,18 @@ class TestCreatedAndArtifacts:
 
 
 class TestTestFreshness:
-    def test_edit_then_pytest_in_one_command_does_not_count(self):
-        # REVIEW-2 N10: only a standalone runner invocation is a suite run; chained commands can forge or reorder
+    def test_edit_then_pytest_in_one_command_counts_when_the_runner_ends_it(self):
+        # the runner is the last segment and the output ends with its own summary: the pass covers the edit
         st = st_with_prompt("Only push after the tests pass.")
         cmd = "python - <<'E'\np='src/a.py'\nopen(p,'w').write('x')\nE\npython -m pytest -q 2>&1 | tail -3"
         observe_post("Bash", {"command": cmd}, {"stdout": "4 passed in 0.01s", "stderr": ""}, st, ROOT, ROOT)
-        assert ev(st, *bash("git push origin main")).decision == "deny"
-        observe_post("Bash", {"command": "python -m pytest -q 2>&1 | tail -3"}, {"stdout": "4 passed in 0.01s", "stderr": ""}, st, ROOT, ROOT)
         assert ev(st, *bash("git push origin main")).decision == "allow"
+
+    def test_chained_run_whose_output_does_not_end_with_a_summary_does_not_count(self):
+        st = st_with_prompt("Only push after the tests pass.")
+        observe_post("Bash", {"command": "echo '4 passed in 0.01s'; python -m pytest -q 2>&1 | tail -3"},
+                     {"stdout": "4 passed in 0.01s\nINTERNALERROR> boom", "stderr": ""}, st, ROOT, ROOT)
+        assert ev(st, *bash("git push origin main")).decision == "deny"
 
     def test_pytest_then_edit_in_one_command_is_stale(self):
         st = st_with_prompt("Only push after the tests pass.")

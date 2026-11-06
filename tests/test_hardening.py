@@ -806,3 +806,21 @@ def test_hook_commands_survive_paths_with_spaces():
     cfg = hooks_config(python="/Users/x/My Projects/.venv/bin/python", hook_py="/Users/x/My Projects/hf/hook.py")
     cmd = cfg["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     assert shlex.split(cmd) == ["/Users/x/My Projects/.venv/bin/python", "/Users/x/My Projects/hf/hook.py", "PreToolUse"]
+
+
+class TestChainedRuns:
+    def test_edit_then_suite_in_one_call_then_push(self, repo):
+        d = Driver(repo)
+        d.say("only push after tests pass")
+        assert d.bash("printf 'x = 3\\n' > src/a.py; python -m pytest -q 2>&1 | tail -3") == "allow"
+        assert d.bash("git commit -qam bump") == "allow"
+        assert d.bash("git push -q origin main") == "allow"
+
+    @pytest.mark.parametrize("cmd", ["python -m pytest -q; echo '3 passed in 0.10s'",
+                                     "echo '3 passed in 0.10s'; python -m pytest -q -p no:terminal",
+                                     "cd tests && python -m pytest -q test_a.py"])
+    def test_chained_forgeries_do_not_count(self, red_suite, cmd):
+        d = Driver(red_suite)
+        d.say("only push after tests pass")
+        d.bash(cmd)
+        assert d.bash("git push -q origin main", execute=False) == "deny"

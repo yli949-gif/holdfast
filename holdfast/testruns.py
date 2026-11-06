@@ -122,9 +122,65 @@ def _script_body(kind: str, name: str, root: str) -> str | None:
     return m.group(1) if m else None
 
 
-def test_run_kind(cmd: str, cwd: str | None = None, root: str | None = None) -> str:
-    """'full' | 'partial' | '' (not an acceptable test-suite run)."""
+def split_trailing_runner(cmd: str) -> tuple[str, str] | None:
+    """`<setup>; <runner> [| tail]` or `<setup> && <runner>` (also a runner on the last line after a heredoc):
+    -> (setup text, runner segment). The runner must be the *last* thing the command does, so its exit status and
+    its summary line are the command's own. None if there is no top-level `;`/`&&`/newline before a final segment."""
+    s = cmd.rstrip()
+    lines = s.split("\n")
+    last_line = lines[-1]
+    head = "\n".join(lines[:-1])
+    try:
+        lx = shlex.shlex(last_line, posix=True, punctuation_chars=";&|<>()")
+        lx.whitespace_split = True
+        toks = list(lx)
+    except ValueError:
+        return None
+    cut = max((i for i, t in enumerate(toks) if t in (";", "&&")), default=-1)
+    if cut < 0:
+        return (head, last_line) if head else None
+    seg = toks[cut + 1:]
+    if not seg or any(t in ("&", "||", "(", ")") for t in seg):
+        return None
+    # rebuild the final segment text from its tokens (quote each word)
+    out, i = [], 0
+    while i < len(seg):
+        t = seg[i]
+        if t in ("|", ">", ">>", "<", ">&") or re.fullmatch(r"\d?>&?\d?|2>&1", t):
+            out.append(t)
+        else:
+            out.append(shlex.quote(t) if t not in ("2>&1",) else t)
+        i += 1
+    tail_txt = " ".join(out).replace("2 >& 1", "2>&1").replace("2 > & 1", "2>&1")
+    pre_toks = toks[:cut]
+    setup = (head + "\n" if head else "") + " ".join(pre_toks)
+    return setup, tail_txt
+
+
+def _setup_changes_dir(setup: str, root: str | None, cwd: str | None) -> bool:
+    for m in re.finditer(r"(?:^|[\s;&|(])(?:cd|pushd)\s+([^\s;&|)]+)", setup):
+        target = os.path.normpath(os.path.join(cwd or root or ".", m.group(1).strip("'\"")))
+        if root is None or os.path.normpath(root) != target:
+            return True
+    return False
+
+
+def test_run_kind(cmd: str, cwd: str | None = None, root: str | None = None, allow_chain: bool = False) -> str:
+    """'full' | 'partial' | '' (not an acceptable test-suite run). With allow_chain, a runner that is the final
+    segment of a chained command (`edit && pytest -q | tail -3`) is judged on that segment (the caller must then
+    check that the output ends with the runner's own summary line)."""
     st = _strip(cmd)
+    if st is None and allow_chain:
+        sp = split_trailing_runner(cmd)
+        if sp is None:
+            return ""
+        setup, last = sp
+        if re.search(r"\b(?:PYTEST_ADDOPTS|PYTEST_PLUGINS)\b|\bexport\b|\balias\b|\bfunction\b|\(\)\s*\{", setup):
+            return PARTIAL if re.search(r"PYTEST_|export", setup) else ""
+        kind = test_run_kind(last, cwd, root)
+        if kind == FULL and _setup_changes_dir(setup, root, cwd):
+            return PARTIAL                    # `cd src && pytest` runs a subset
+        return kind
     if st is None:
         return ""
     s, cd = st
@@ -132,6 +188,9 @@ def test_run_kind(cmd: str, cwd: str | None = None, root: str | None = None) -> 
     if not argv:
         return ""
     base = os.path.join(cwd or root or ".", cd) if cd else (cwd or root or ".")
+    if cd and root and os.path.normpath(base) != os.path.normpath(root):
+        k = test_run_kind(s, base, root)
+        return PARTIAL if k == FULL else k      # `cd src && pytest` collects only what is under src/
     proj = root or base
     if argv == ["__partial__"]:
         return PARTIAL
@@ -182,6 +241,17 @@ def test_run_kind(cmd: str, cwd: str | None = None, root: str | None = None) -> 
             return ""
         return FULL if len(args) == 1 else PARTIAL
     return ""
+
+
+_SUMMARY_LAST = re.compile(r"^[=\s]*(?:\d+ (?:failed|passed|errors?|skipped|xfailed|xpassed|deselected|warnings?|rerun)(?:, )?)+\s+in "
+                           r"[\d.]+s(?:\s*\([^)]*\))?\s*=*\s*$|^Tests:\s+.*\d+ total\s*$|^test result: (?:ok|FAILED)\..*$|"
+                           r"^(?:ok|FAIL)\s+\S+.*$|^\s*\d+ (?:passing|failing)(?: \(\S+\))?\s*$|^(?:Ran \d+ tests? in .*|OK.*|FAILED.*)$")
+
+
+def ends_with_runner_summary(stdout: str, stderr: str) -> bool:
+    """The last non-empty output line is a test runner's own summary (not something echoed earlier)."""
+    lines = [l for l in ((stdout or "") + "\n" + (stderr or "")).splitlines() if l.strip()]
+    return bool(lines) and bool(_SUMMARY_LAST.match(lines[-1].strip()))
 
 
 def tree_changing_git(cmd: str) -> bool:

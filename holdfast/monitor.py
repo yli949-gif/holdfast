@@ -387,7 +387,7 @@ def observe_post(tool_name: str, tool_input: dict, tool_response: dict | str, st
                  tool_use_id: str = "", failed: bool = False) -> dict:
     """Update temporal state after a tool ran (PostToolUse, or PostToolUseFailure with failed=True)."""
     from .shell import is_test_success
-    from .testruns import FULL, PARTIAL, test_run_kind, tree_changing_git
+    from .testruns import FULL, PARTIAL, ends_with_runner_summary, test_run_kind, tree_changing_git
     effects = effect_from_tool(tool_name, tool_input, cwd, root)
     now = time.time()
     changed = {}
@@ -409,12 +409,20 @@ def observe_post(tool_name: str, tool_input: dict, tool_response: dict | str, st
         if failed and ok is not None:
             ok = False
         kind = test_run_kind(cmd, cwd, root) if ok is not None else ""
+        chained = False
+        if ok is not None and not kind:
+            # `edit && pytest -q | tail -3`: the runner is the last thing the command does. It counts only when the
+            # output ends with the runner's own summary line, and it is stamped *after* the edits in the command
+            kind = test_run_kind(cmd, cwd, root, allow_chain=True)
+            chained = bool(kind)
+            if chained and not ends_with_runner_summary(resp.get("stdout", ""), resp.get("stderr", "")):
+                kind = ""
         if ok is True and kind == FULL and test_config_modified(root):
             kind = PARTIAL                       # uncommitted addopts/testpaths/conftest changes may select a subset
             state["tests_partial_reason"] = "test configuration has uncommitted changes"
         if ok is True and kind == FULL and not resp.get("interrupted") and not _prints_fake_summary(cmd):
             # stamped with the time the run *started*: an edit that lands while it runs makes it stale (N5 race)
-            ts = started if started else now
+            ts = (now + 1e-3) if chained else (started if started else now)
             state["tests_passed_at"] = ts
             changed["tests_passed_at"] = ts
             state["tests_passed_tree"] = state.get("test_started_tree", {}).pop(tool_use_id, None) or working_tree_id(root)
