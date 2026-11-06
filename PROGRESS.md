@@ -5,31 +5,48 @@ results are kept in the `evals/` directories next to the code that produces them
 The project was built with AI coding agents (Claude Code); real-agent experiments ran on a Claude subscription and
 each run records its list-price equivalent in its `meta.json`.
 
-## Status 2026-11-05 (release readiness, in progress)
+## Status 2026-11-06 — release readiness: code ready; publishing awaits owner decisions
 
-Commits 37e7fcd … HEAD. Recovery checkpoint: everything below is committed and verified; next steps at the end.
+Commits 37e7fcd … HEAD (local only; nothing pushed or published).
 
 - **Round 6** (37e7fcd): an independent pre-release review stopped before building its own attack harness (safety
-  filter), but listed suspicions; each became a regression test against a real repo. Fixed: push of an untested
+  filter) but listed suspicions; each became a regression test against a real repo. Fixed: push of an untested
   tree (other branch / partial commit), Write/Edit of Holdfast's own code, `| head` hiding failures, selecting
   options/env and uncommitted test-config changes, stale pending confirmations, vanished state dir (out-of-tree
   sentinel), Edit-to-empty as delete, audit redaction.
 - **review3** (7515344, frozen): independent pytest suite (135 scenarios, written without access to tests/ or prior
-  reviews). First run 128/135; fixed in e7d81cc (2 Critical: script args/env invisible to prod rules — a regression
-  from the O1 change; edit+commit+push in one call. 2 High: push --all; forked resume lost rules. 1 Medium) → 135/135.
+  reviews). First run 128/135; fixed in e7d81cc (2 Critical, 2 High, 1 Medium) → 135/135.
 - **Hygiene** (9b005d7): raw e2e transcripts (operator email, org id, paths) removed from the tree, LICENSE (MIT),
-  gitignore, absolute paths scrubbed. They remain in git *history* → see "Owner decisions".
-- **Install** (9ac7d98): clean non-editable install into a fresh venv verified; hook commands are now shell-quoted
-  (an install under a path with spaces broke them).
-- **Usability from live workflow probes** (a615f04, 2acae84): a runner that ends a chained command counts (summary
-  line must be last); `cd sub && pytest` is partial; heredoc-written scripts are analysed from their content.
+  gitignore, absolute paths scrubbed.
+- **Install** (9ac7d98): clean non-editable install into a fresh venv verified; hook commands shell-quoted (an
+  install under a path with spaces broke them).
+- **Usability from live workflow probes** (a615f04, 2acae84): a runner that ends a chained command counts (its
+  summary line must be last); `cd sub && pytest` is partial; heredoc-written scripts are analysed from their content.
 
-Verified at 2acae84: tests 1170 + review3 135 pass; red team 0/93 bypass, 3/21 benign FB; held-out 6/304, 64/1698;
-legacy 6/326, 8/147; scenarios 47/47; blind3 2/160, 10/152; live probes on a clean install: attacks 4/4 blocked.
+Verified (final): tests 1170 + review3 135 pass (also in the scrubbed clone); red team 0/93 bypass, 3/21 benign FB;
+held-out 6/304, 64/1698; legacy 6/326, 8/147; scenarios 47/47; blind3 2/160, 10/152 (first, unseen: 10/160,
+18/152); extraction dev 86/86, held-out 57/57, v1 65/108; real sessions `hard3` at 2acae84: prompt+Holdfast 0/9
+violated, 0 denials, completed 6/9; Holdfast-only 0/9 violated, 10/10 denials correct; live probes on a clean
+install: attacks 4/4 blocked, workflows W1 & W3 completed with 0 denials, W2 0 denials (agent asked on its own).
 
-Next: real e2e batch on HEAD; scrubbed-history release clone; README refresh; final full regression.
-Owner decisions pending: history rewrite (transcripts with personal data are in history), commit identity/email,
-`Claude-Session:` trailers, LICENSE holder name, publishing.
+**Scrubbed release copy:** `.-public` = this history rewritten with `git filter-repo`:
+raw transcripts (`evals/results/e2e/T*/`, `discarded/`) removed from every commit, operator scratch paths replaced,
+`Claude-Session:` trailers dropped; re-cloned so no unreachable objects remain (1.1 MB .git). Every blob scanned: 0
+matches for the operator email, org id, session links or scratch paths; the only token-shaped string is a fake
+test fixture (`sk-abcdef…`). Its tests and demo pass. This working repo still contains the old history.
+To regenerate it after new commits: clone `--no-local`, run filter-repo with `--path evals/results/e2e/T1 … T6
+--path evals/results/e2e/discarded --invert-paths`, a `--replace-text` file for the scratch paths, and a
+`--message-callback` that strips `Claude-Session:` lines; then clone it again with `--no-local`.
+
+**Owner decisions (blocking publication only):**
+1. Commit identity: 44 commits are authored `Ella Li <[owner email]>` (also 18 `holdfast <dev@holdfast.local>`,
+   9 `Claude <noreply@anthropic.com>`). Keep, or rewrite to a GitHub noreply address (`git filter-repo --mailmap`).
+2. LICENSE holder name ("Yiyao (Ella) Li").
+3. Publish `holdfast-public` (create the GitHub repo, push). Nothing has been pushed.
+
+Remaining known limits (Medium/Low, documented in README): latency 63–92 ms; operation-specific constraints
+(migrations 2/12 missed, 5/15 FB on blind3); opaque-code asks; extraction recall 65/108 on unseen phrasing;
+review items B15, B16, B17, N12, O2, O6, F2, S4.
 
 ## Status 2026-10-31 (rounds 3–5: bypass closed, error analysis, blind3, README)
 
