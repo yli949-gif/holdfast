@@ -29,7 +29,7 @@ held-out 6/304, 64/1698; legacy 6/326, 8/147; scenarios 47/47; blind3 2/160, 10/
 violated, 0 denials, completed 6/9; Holdfast-only 0/9 violated, 10/10 denials correct; live probes on a clean
 install: attacks 4/4 blocked, workflows W1 & W3 completed with 0 denials, W2 0 denials (agent asked on its own).
 
-**Scrubbed release copy:** `.-public` = this history rewritten with `git filter-repo`:
+**Scrubbed release copy:** a sibling clone `holdfast-public` = this history rewritten with `git filter-repo`:
 raw transcripts (`evals/results/e2e/T*/`, `discarded/`) removed from every commit, operator scratch paths replaced,
 `Claude-Session:` trailers dropped; re-cloned so no unreachable objects remain (1.1 MB .git). Every blob scanned: 0
 matches for the operator email, org id, session links or scratch paths; the only token-shaped string is a fake
@@ -39,7 +39,7 @@ To regenerate it after new commits: clone `--no-local`, run filter-repo with `--
 `--message-callback` that strips `Claude-Session:` lines; then clone it again with `--no-local`.
 
 **Owner decisions (blocking publication only):**
-1. Commit identity: 44 commits are authored `Ella Li <[owner email]>` (also 18 `holdfast <dev@holdfast.local>`,
+1. Commit identity: 44 commits are authored with the owner's personal email (also 18 `holdfast <dev@holdfast.local>`,
    9 `Claude <noreply@anthropic.com>`). Keep, or rewrite to a GitHub noreply address (`git filter-repo --mailmap`).
 2. LICENSE holder name ("Yiyao (Ella) Li").
 3. Publish `holdfast-public` (create the GitHub repo, push). Nothing has been pushed.
