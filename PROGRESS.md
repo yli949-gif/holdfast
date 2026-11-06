@@ -39,10 +39,10 @@ To regenerate it after new commits: clone `--no-local`, run filter-repo with `--
 `--message-callback` that strips `Claude-Session:` lines; then clone it again with `--no-local`.
 
 **Owner decisions (blocking publication only):**
-1. Commit identity: 44 commits are authored with the owner's personal email (also 18 `holdfast <dev@holdfast.local>`,
-   9 `Claude <noreply@anthropic.com>`). Keep, or rewrite to a GitHub noreply address (`git filter-repo --mailmap`).
-2. LICENSE holder name ("Yiyao (Ella) Li").
-3. Publish `holdfast-public` (create the GitHub repo, push). Nothing has been pushed.
+1. Commit identity — decided: every author/committer email in the published history is the owner's GitHub noreply address. (Before: 44 commits were authored with the owner's personal email (also 18 `holdfast <dev@holdfast.local>`,
+   9 `Claude <noreply@anthropic.com>`). rewritten with `git filter-repo --email-callback`.)
+2. LICENSE holder name — decided: "Yiyao Li".
+3. Publish `holdfast-public` — approved.
 
 Remaining known limits (Medium/Low, documented in README): latency 63–92 ms; operation-specific constraints
 (migrations 2/12 missed, 5/15 FB on blind3); opaque-code asks; extraction recall 65/108 on unseen phrasing;
