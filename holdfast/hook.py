@@ -25,6 +25,24 @@ def _emit(obj: dict | None) -> None:
     sys.stdout.flush()
 
 
+def inherit_rules(store: Store) -> None:
+    sessions = sorted((p for p in store.path.parent.glob("*.json") if not p.name.endswith((".bak.json",)) and ".corrupt." not in p.name
+                       and p != store.path), key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in sessions:
+        try:
+            prev = Store._read(p)
+        except (OSError, ValueError):
+            continue
+        rules = [r for r in prev.get("rules", []) if r.get("active", True) and r.get("source") != "config"]
+        if not rules:
+            continue
+        with store.locked() as st:
+            have = {r["id"] for r in st["rules"]}
+            st["rules"] += [r for r in rules if r["id"] not in have]
+            st["inherited_from"] = p.stem
+        return
+
+
 def run(event: str, payload: dict, cfg: Config | None = None) -> dict | None:
     cfg = cfg or Config()
     cwd = payload.get("cwd") or os.getcwd()
@@ -95,6 +113,10 @@ def run(event: str, payload: dict, cfg: Config | None = None) -> dict | None:
             return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n".join(msgs)}}
         return None
 
+    if event == "SessionStart" and payload.get("source") in ("resume", "fork") and not store.path.exists():
+        # `--resume … --fork-session` continues the conversation under a new id: carry the constraints over from the
+        # most recent session of this project (more rules is the safe direction; review3 High)
+        inherit_rules(store)
     if event in ("SessionStart", "SubagentStart", "PostCompact"):
         with store.locked() as st:
             if event == "PostCompact" or payload.get("source") == "compact":

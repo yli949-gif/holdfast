@@ -1854,7 +1854,8 @@ def _git_push(sub, rest, ctx, detail):
     current = _git_current_branch(ctx.cwd, ctx)
     effs: list[Effect] = []
     if mirror or (allrefs and not specs):
-        return [Effect("force_push" if (mirror or forced) else "push", f"{remote}/*", kind="branch", detail=detail)]
+        return [Effect("force_push" if (mirror or forced) else "push", f"{remote}/*", kind="branch",
+                       detail=detail + (" (local remote)" if _remote_is_local(remote, ctx) else "") + " [src=*]")]
     if not specs:
         specs = [current or "HEAD"]
     for spec in specs:
@@ -3329,7 +3330,10 @@ def _script_file(path: str, ctx: Ctx, detail: str, lang: str | None, share: bool
         e.detail = note + e.detail
         precise.append(e)
     if lang in ("sh", "python") and not any(e.action == "exec_opaque" for e in body):
-        return precise          # fully analysed body: what it does is known, no blanket "could do anything" (O1)
+        # fully analysed body: what it does is known, no blanket "could do anything" (O1). The invocation itself is
+        # still a `run` with its arguments and environment (`NODE_ENV=production ./deploy.sh`, `deploy.sh prod`), so
+        # command-pattern rules such as "never touch production" still see it (review3 Critical)
+        return precise + [Effect("run", detail, kind="command", detail=detail)]
     return precise + [opaque]
 
 
@@ -3388,17 +3392,37 @@ def classify_command(cmd: str, cwd: str, root: str | None = None, depth: int = 0
     return effs
 
 
+_PYTEST_SUMMARY = re.compile(r"^[=\s]*((?:\d+ (?:failed|passed|errors?|skipped|xfailed|xpassed|deselected|warnings?|"
+                             r"rerun)(?:, )?)+)\s+in [\d.]+s", re.M)
+
+
 def is_test_success(command: str, stdout: str, stderr: str) -> bool | None:
-    """Heuristic: did a test command succeed? Returns None if the command is not a test runner."""
+    """Did a test command succeed? None if the command is not a test runner. The runner's own summary line decides
+    when there is one (so a green run that prints 'ValueError:' or a test named test_failing_input is green);
+    otherwise conservative text heuristics."""
     joined = command.strip()
     effs = classify_command(joined, "/", "/", fs=False)
     if not any(e.action == "test" for e in effs):
         return None
     text = (stdout or "") + "\n" + (stderr or "")
-    if re.search(r"\b\d+ (?:failed|errors?)\b", text) or re.search(r"\bFAILED\b|\bERROR\b|Error:|failing|✗|✕|Tests:\s+\d+ failed|FAIL\b", text):
+    summ = _PYTEST_SUMMARY.findall(text)
+    if summ:
+        counts = dict((w.rstrip("s") if w.startswith(("error", "warning")) else w, int(n))
+                      for n, w in re.findall(r"(\d+) (\w+)", summ[-1]))
+        return counts.get("failed", 0) == 0 and counts.get("error", 0) == 0 and counts.get("passed", 0) > 0
+    jest = re.findall(r"^Tests:\s+(.*)$", text, re.M)
+    if jest:
+        return "failed" not in jest[-1] and bool(re.search(r"\d+ passed", jest[-1]))
+    cargo = re.findall(r"^test result: (ok|FAILED)\.", text, re.M)
+    if cargo:
+        return all(c == "ok" for c in cargo)
+    mocha_fail = re.search(r"^\s*(\d+) failing", text, re.M)
+    mocha_pass = re.search(r"^\s*(\d+) passing", text, re.M)
+    if mocha_pass or mocha_fail:
+        return bool(mocha_pass) and not (mocha_fail and int(mocha_fail.group(1)) > 0)
+    if re.search(r"\b\d+ (?:failed|errors?)\b", text) or re.search(r"\bFAILED\b|\bERROR\b|Error:|failing|✗|✕|FAIL\b", text):
         return False
-    if re.search(r"\b\d+ passed\b|\bpassed\b|\bPASS\b|Tests:\s+\d+ passed|✓|ok\b|OK\b", text):
+    if re.search(r"\b\d+ passed\b|\bpassed\b|\bPASS\b|✓|ok\b|OK\b", text):
         return True
-    if "no tests ran" in text or "collected 0 items" in text:
-        return False
+    return False
     return False

@@ -208,8 +208,25 @@ def test_config_modified(root: str | None) -> bool:
 
 
 def _push_source_trees(e: Effect, root: str | None) -> list[str] | None:
+    """Trees of what this push would send. `--all`/`--mirror`/`--branches`: every local branch that differs from
+    its remote-tracking ref (review3 High: only HEAD was compared)."""
     m = re.search(r"\[src=([^\]]*)\]", e.detail or "")
     src = (m.group(1) if m else "") or "HEAD"
+    if src == "*":
+        remote = e.target.split("/", 1)[0]
+        refs = _git(root, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads")
+        if refs is None:
+            return None
+        trees = []
+        for line in refs.splitlines():
+            name, _, sha = line.partition(" ")
+            if _git(root, "rev-parse", "--verify", "-q", f"refs/remotes/{remote}/{name}") == sha:
+                continue               # already on the remote: nothing to push for this branch
+            t = _git(root, "rev-parse", "--verify", "-q", f"{sha}^{{tree}}")
+            if t is None:
+                return None
+            trees.append(t)
+        return trees
     tree = _git(root, "rev-parse", "--verify", "-q", f"{src}^{{tree}}")
     return [tree] if tree else None
 
@@ -293,7 +310,11 @@ def evaluate(tool_name: str, tool_input: dict, state: dict, cwd: str, root: str 
                                              f"Blocked effect: {e.action} {e.target}. Adjust your approach instead of editing frozen files.", rule.id, effects)
             elif rule.kind == "require_before":
                 stale_tree = None
-                if rule.prerequisite == "tests_pass" and _tests_fresh(state) and state.get("tests_passed_tree") \
+                idx = next((k for k, x in enumerate(effects) if x is e), len(effects))
+                if rule.prerequisite == "tests_pass" and e.action in ("push", "force_push") and any(
+                        x.action in ("edit", "write", "delete", "move", "discard", "history_rewrite") for x in effects[:idx]):
+                    stale_tree = True       # `edit && git commit && git push`: the push runs after an untested change
+                elif rule.prerequisite == "tests_pass" and _tests_fresh(state) and state.get("tests_passed_tree") \
                         and e.action in ("push", "force_push"):
                     trees = _push_source_trees(e, root)
                     if trees is None or any(t != state["tests_passed_tree"] for t in trees):

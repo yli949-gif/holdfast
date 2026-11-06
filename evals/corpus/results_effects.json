@@ -2787,7 +2787,7 @@
    ],
    "predicted": [
     [
-     "run",
+     "read",
      "make -n clean",
      true
     ]
